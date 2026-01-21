@@ -8,8 +8,9 @@ const MoodNodeScene = preload("res://Scenes/MoodNode.tscn")
 var current_depth_layer = 0
 var current_path_stack: Array = [] 
 
-const SAVE_PATH = "user://mood_board_v3.json"
+const SAVE_PATH = "user://mood_board_save.json"
 const DEFAULT_DATA_PATH = "res://default_data.json"
+const DEBUG_DATA_PATH = "res://debug_data.json"
 
 # Data Structure 
 var mood_data = {}
@@ -24,8 +25,8 @@ func _ready():
 	ui_scene.connect("add_node_requested", add_new_node)
 	ui_scene.connect("node_data_changed", func(_d): save_data())
 	
-	# Connect Camera Panning
-	camera.connect("panned", _on_camera_panned)
+	# Connect Camera Rotation (Renamed from panned)
+	camera.connect("rotated", _on_camera_rotated)
 	
 	load_data()
 	
@@ -42,18 +43,28 @@ func save_data():
 		file.store_string(json)
 
 func load_data():
-	# 1. Try User Save
+	# 1. Try Debug Data (res://debug_data.json) - Priority!
+	if FileAccess.file_exists(DEBUG_DATA_PATH):
+		var file = FileAccess.open(DEBUG_DATA_PATH, FileAccess.READ)
+		var error = _parse_json_file(file)
+		if error == OK:
+			print("DEBUG MODE: Loaded debug_data.json")
+			return
+
+	# 2. Try User Save
 	if FileAccess.file_exists(SAVE_PATH):
 		var file = FileAccess.open(SAVE_PATH, FileAccess.READ)
 		var error = _parse_json_file(file)
 		if error == OK:
+			print("Loaded User Save")
 			return
 	
-	# 2. Try Default Data (res://)
+	# 3. Try Default Data (res://)
 	if FileAccess.file_exists(DEFAULT_DATA_PATH):
 		var file = FileAccess.open(DEFAULT_DATA_PATH, FileAccess.READ)
 		var error = _parse_json_file(file)
 		if error == OK:
+			print("Loaded Default Data")
 			return
 
 func _parse_json_file(file: FileAccess) -> Error:
@@ -104,38 +115,28 @@ var current_view_data: Dictionary = {}
 func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimType = AnimType.DEFAULT, focus_pos: Vector3 = Vector3.ZERO):
 	current_view_data = parent_data
 	
-	# --- Camera Panning Fix (Node Based) ---
-	# The camera is STATIC at (0,0). The node_root is what moves.
-	# When we spawn a new layer, we want the "center" of that new layer to be at (0,0).
-	# But visually, we want to maintain continuity.
+	# --- Auto-Clustering Logic ---
+	# If parent_data has children, we must process them to check for Clustering needs
+	var processed_children = _process_layer_data(parent_data.get("children", []))
 	
-	# Current State:
-	# node_root is at some position (P_old).
-	# camera is at (0,0).
+	# --- Rotation Handling ---
+	# We want to maintain continuity.
+	# The previous `node_root` might be rotated.
+	# When we spawn the NEW layer, does it start at rotation 0?
+	# YES, usually. We are "entering" a new context.
+	# But the EXIT transition needs to account for the current rotation.
 	
-	# Transition Logic:
-	# 1. We want to TUNNEL IN to a specific node at `focus_pos` (local to node_root).
-	#    The world position of that node is `node_root.position + focus_pos`.
-	#    To center it, we need to move `node_root` such that `node_root.position + focus_pos = (0,0)`.
-	#    So Target Node Root Pos = `-focus_pos`.
+	var current_rot = node_root.rotation.z
 	
-	# 2. For the "Exit" animation (old nodes leaving), we treat them as a group.
-	#    We move them into a temporary `exit_root` that mimics the current `node_root` transform.
+	node_root.rotation.z = 0 # Reset for new layer
 	
+	# Handle existing nodes animation (Exit)
 	var old_nodes = node_root.get_children()
 	var exit_root = Node3D.new()
 	add_child(exit_root)
 	
-	# Inherit the current panning offset so they don't jump
-	exit_root.position = node_root.position
-	
-	# Reset node_root to (0,0) for the NEW layer? 
-	# Actually, for the NEW layer, we want it to start centered (0,0) by default, 
-	# or should it inherit the parent's offset?
-	# Users usually expect "entering" a node to reset the view to that node's context.
-	# So RESETTING node_root to (0,0) is correct for the new layer's logical origin.
-	
-	node_root.position = Vector3.ZERO
+	# Match rotation so no visual snap
+	exit_root.rotation.z = current_rot
 	
 	for child in old_nodes:
 		child.reparent(exit_root) 
@@ -146,27 +147,31 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 	
 	if anim_type == AnimType.TUNNEL_IN:
 		# ANIMATION:
-		# We want the *Clicked Node* (which is now inside exit_root) to fly towards the camera (0,0,Z).
-		# The Clicked Node's position inside exit_root is `focus_pos`.
-		# So we tween `exit_root.position` such that `exit_root.position + focus_pos` goes to `(0,0, Z_behind)`.
+		# Tunnel In Target: The clicked node at `focus_pos` (local to `exit_root`).
+		# We want to bring that node to (0,0,Z_behind).
+		# BUT `exit_root` is rotated by `current_rot`.
+		# So the WORLD position of the target is: `focus_pos.rotated(Z, current_rot)`.
 		
-		# Current exit_root.position is whatever the user panned to.
-		# Target exit_root.position = -focus_pos (to center X,Y)
+		# To center it, we need to move `exit_root` so that world pos becomes (0,0).
+		# `exit_root.position` should be opposite of the rotated focus pos.
+		
+		var world_focus_target = focus_pos.rotated(Vector3.BACK, current_rot) # Vector3.BACK is (0,0,1)? Wrapper needed.
+		# Actually, rotation is Z axis. Vector3 rotation in GDScript:
+		var start_vec = Vector3(focus_pos.x, focus_pos.y, 0)
+		var rotated_vec = start_vec.rotated(Vector3(0,0,1), current_rot)
 		
 		var duration = 0.5
 		
 		# 1. Center the target node (XY)
-		exit_tween.tween_property(exit_root, "position:x", -focus_pos.x, duration).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
-		exit_tween.tween_property(exit_root, "position:y", -focus_pos.y, duration).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		exit_tween.tween_property(exit_root, "position:x", -rotated_vec.x, duration).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+		exit_tween.tween_property(exit_root, "position:y", -rotated_vec.y, duration).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 		
 		# 2. Zoom pass (Z)
-		# Move it way behind camera
 		exit_tween.tween_property(exit_root, "position:z", 20.0, duration).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
 		exit_tween.tween_property(exit_root, "scale", Vector3.ONE * 3.0, duration).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
 		
 	elif anim_type == AnimType.TUNNEL_OUT:
 		# Going Back:
-		# The current layer (now exit_root) shrinks into the distance.
 		exit_tween.tween_property(exit_root, "position:z", -50.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
 		exit_tween.tween_property(exit_root, "scale", Vector3.ZERO, 0.5)
 	
@@ -180,14 +185,13 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 
 	# --- Spawn New Nodes ---
 
-	var children_data = parent_data.get("children", [])
-	var count = children_data.size()
-	# Reduced radius to ensure nodes fit in camera view (requested by user)
-	var radius = 4.0 + (count * 0.5)
+	var count = processed_children.size()
+	# Standard radius for ~12 items
+	var radius = 4.0 if count <= 12 else 6.0 
 	var angle_step = TAU / count
 	
 	for i in range(count):
-		var data = children_data[i]
+		var data = processed_children[i]
 		var angle = i * angle_step
 		var pos_offset = Vector3(cos(angle) * radius, sin(angle) * radius, 0)
 		var target_pos = center_pos + pos_offset
@@ -262,17 +266,58 @@ func _on_node_entered(node):
 	# Direct tunnel entry instead of camera zoom first
 	_enter_node(node)
 
-func _on_camera_panned(relative_motion: Vector2):
-	# Move node_root instead of camera
-	# If I drag mouse RIGHT (positive x), camera would move LEFT. 
-	# So we want objects to move RIGHT.
-	# The event.relative is passed through.
-	# CameraController: emit_signal("panned", event.relative * pan_sensitivity)
+func _on_camera_rotated(angle_delta: float):
+	# Rotate the whole ring
+	node_root.rotation.z += angle_delta
 	
-	node_root.position.x += relative_motion.x
-	node_root.position.y -= relative_motion.y # Y is flip? Drag down (pos Y) = Move Objects Down? 
-	# Standard pan: Drag text up -> Text moves up.
-	# Mouse move down = +Y. Object Y += +Y.
+	# Counter-rotate children so they stay upright (Ferris Wheel effect)
+	var current_rot = node_root.rotation.z
+	for child in node_root.get_children():
+		child.rotation.z = -current_rot
+
+# --- Auto Clustering ---
+func _process_layer_data(raw_children: Array) -> Array:
+	const MAX_NODES = 12
+	if raw_children.size() <= MAX_NODES:
+		return raw_children
+		
+	# CLUSTERING ALGORITHM
+	var clusters = []
+	var chunk_size = MAX_NODES 
+	# If massive (e.g. 1000), we might need larger chunks or recursive logic.
+	# For now, simple chunking is fine for 100s.
+	
+	var chunks = []
+	var current_chunk = []
+	for item in raw_children:
+		current_chunk.append(item)
+		if current_chunk.size() >= chunk_size:
+			chunks.append(current_chunk)
+			current_chunk = []
+	if current_chunk.size() > 0:
+		chunks.append(current_chunk)
+		
+	# Create Cluster Nodes
+	for idx in range(chunks.size()):
+		var chunk = chunks[idx]
+		var first_name = chunk[0].get("name", "Unknown")
+		var last_name = chunk[-1].get("name", "Unknown")
+		
+		# Abbreviate names for label? 
+		var cluster_name = "%s - %s" % [first_name.left(10), last_name.left(10)]
+		if first_name.left(1) == last_name.left(1): # Same letter grouping?
+			cluster_name = first_name.left(1) + " Section " + str(idx+1)
+			
+		var cluster_node_data = {
+			"name": cluster_name,
+			"color": Color.GRAY.to_html(), # Neutral color for groups
+			"children": chunk, # The actual items are children of this group!
+			"is_cluster": true # Marker
+		}
+		clusters.append(cluster_node_data)
+		
+	return clusters
+
 	
 func _enter_node(node):
 	var data = node.node_data

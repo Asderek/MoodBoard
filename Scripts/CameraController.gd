@@ -5,7 +5,7 @@ var current_focus_point: Vector3 = Vector3.ZERO
 var default_distance: float = 12.0
 
 
-signal panned(relative_motion)
+signal rotated(angle_delta)
 
 func _ready():
 	# Set initial position
@@ -34,17 +34,15 @@ func zoom_into(target_pos: Vector3, completion_callback: Callable):
 	tween.tween_property(self, "position", zoom_pos, 0.8).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
 	tween.tween_callback(completion_callback)
 
-var is_panning = false
+var is_dragging = false
 var pan_sensitivity = 0.02
 
 func _unhandled_input(event):
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
-			is_panning = event.pressed
+			is_dragging = event.pressed
 	
-	if event is InputEventMouseMotion and is_panning:
-		# "Grab and Drag" behavior
-		# Drag Right (Pos X) -> Move Camera Left (Neg X)
-		# Drag Down (Pos Y) -> Move Camera Up (Pos Y)
-		# Emit signal for main controller to handle node movement
-		emit_signal("panned", event.relative * pan_sensitivity)
+	if event is InputEventMouseMotion and is_dragging:
+		# Drag Right (Pos X) -> Rotate Left (Neg Angle) to spin ring like a wheel
+		# Drag Speed factor
+		emit_signal("rotated", -event.relative.x * pan_sensitivity * 0.5)
