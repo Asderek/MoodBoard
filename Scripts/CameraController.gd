@@ -4,6 +4,9 @@ var tween: Tween
 var current_focus_point: Vector3 = Vector3.ZERO
 var default_distance: float = 12.0
 
+
+signal panned(relative_motion)
+
 func _ready():
 	# Set initial position
 	position = Vector3(0, 0, default_distance)
@@ -43,5 +46,5 @@ func _unhandled_input(event):
 		# "Grab and Drag" behavior
 		# Drag Right (Pos X) -> Move Camera Left (Neg X)
 		# Drag Down (Pos Y) -> Move Camera Up (Pos Y)
-		position.x -= event.relative.x * pan_sensitivity
-		position.y += event.relative.y * pan_sensitivity
+		# Emit signal for main controller to handle node movement
+		emit_signal("panned", event.relative * pan_sensitivity)
