@@ -34,6 +34,13 @@ func _ready():
 	$ForegroundLayer/Sidebar/VBoxContainer/SaveButton.pressed.connect(_on_save_pressed)
 	
 	_setup_bg_toggle() # Add CheckBox dynamically
+	_setup_sidebar_toggle()
+	_setup_exit_button()
+	_setup_bottom_left_buttons()
+	
+	# Fix: Explicitly connect delete buttons (missing from previous cleanup)
+	delete_mode_btn.pressed.connect(_on_delete_mode_pressed)
+	delete_cancel_btn.pressed.connect(_on_delete_cancel_pressed)
 	
 	color_picker.color_changed.connect(_on_color_changed)
 
@@ -90,13 +97,40 @@ func _setup_sidebar_toggle():
 	btn.anchor_left = 1.0
 	btn.anchor_right = 1.0
 	btn.offset_bottom = -20
-	btn.offset_top = -120 
 	btn.offset_top = -80
 	
 	btn.offset_left = -160
 	btn.offset_right = -120 
 	
 	btn.pressed.connect(_on_toggle_sidebar)
+
+func _setup_bottom_left_buttons():
+	# Add Button
+	add_button.anchors_preset = Control.PRESET_BOTTOM_LEFT
+	add_button.anchor_top = 1.0; add_button.anchor_bottom = 1.0
+	add_button.anchor_left = 0.0; add_button.anchor_right = 0.0
+	add_button.offset_left = 20
+	add_button.offset_right = 60
+	add_button.offset_top = -60
+	add_button.offset_bottom = -20
+	
+	# Delete Mode Button
+	delete_mode_btn.anchors_preset = Control.PRESET_BOTTOM_LEFT
+	delete_mode_btn.anchor_top = 1.0; delete_mode_btn.anchor_bottom = 1.0
+	delete_mode_btn.anchor_left = 0.0; delete_mode_btn.anchor_right = 0.0
+	delete_mode_btn.offset_left = 80
+	delete_mode_btn.offset_right = 200
+	delete_mode_btn.offset_top = -60
+	delete_mode_btn.offset_bottom = -20
+	
+	# Delete Cancel Button
+	delete_cancel_btn.anchors_preset = Control.PRESET_BOTTOM_LEFT
+	delete_cancel_btn.anchor_top = 1.0; delete_cancel_btn.anchor_bottom = 1.0
+	delete_cancel_btn.anchor_left = 0.0; delete_cancel_btn.anchor_right = 0.0
+	delete_cancel_btn.offset_left = 220
+	delete_cancel_btn.offset_right = 260
+	delete_cancel_btn.offset_top = -60
+	delete_cancel_btn.offset_bottom = -20
 	
 var is_sidebar_collapsed = false
 const SIDEBAR_WIDTH = 300
@@ -109,7 +143,7 @@ func _on_toggle_sidebar():
 	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	
 	var toggle_btn = $ForegroundLayer.get_node_or_null("SidebarToggle")
-	var ctrls = [add_button, delete_mode_btn, delete_cancel_btn, toggle_btn]
+	var ctrls = [toggle_btn]
 	
 	if is_sidebar_collapsed:
 		tween.tween_property(sidebar, "offset_left", 0, 0.3)
