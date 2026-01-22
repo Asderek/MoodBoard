@@ -1,0 +1,129 @@
+[gd_scene load_steps=2 format=3 uid="uid://mainmenu123"]
+
+[ext_resource type="Script" path="res://Scripts/MainMenu.gd" id="1_script"]
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="ColorRect" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.1, 0.1, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -100.0
+offset_top = -100.0
+offset_right = 100.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 20
+
+[node name="Label" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "Mood Board"
+horizontal_alignment = 1
+
+[node name="BtnNew" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "New Board"
+
+[node name="BtnLoad" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Load Board"
+
+[node name="BtnTutorial" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Tutorial"
+
+[node name="FileDialog" type="FileDialog" parent="."]
+title = "Open a File"
+initial_position = 2
+size = Vector2i(600, 400)
+ok_button_text = "Open"
+file_mode = 0
+access = 1
+filters = PackedStringArray("*.moo ; Mood Board Files")
+
+[node name="NewBoardPopup" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ColorRectDim" type="ColorRect" parent="NewBoardPopup"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.5)
+
+[node name="Panel" type="Panel" parent="NewBoardPopup"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -75.0
+offset_right = 150.0
+offset_bottom = 75.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="NewBoardPopup/Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="Label" type="Label" parent="NewBoardPopup/Panel/VBoxContainer"]
+layout_mode = 2
+text = "Enter Board Name:"
+horizontal_alignment = 1
+
+[node name="NameEdit" type="LineEdit" parent="NewBoardPopup/Panel/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "MyProject"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="NewBoardPopup/Panel/VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="BtnCancel" type="Button" parent="NewBoardPopup/Panel/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+text = "Cancel"
+
+[node name="BtnCreate" type="Button" parent="NewBoardPopup/Panel/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+text = "Create"

@@ -19,7 +19,7 @@ var original_scale: Vector3 = Vector3.ONE
 var is_dragging = false
 var is_pressed = false
 var press_time = 0
-var drag_threshold = 250 # 0.25s
+@export var drag_threshold = 250 # 0.25s
 var drag_plane = Plane(Vector3.BACK, 0)
 
 func setup(data: Dictionary):

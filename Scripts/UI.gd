@@ -2,6 +2,8 @@ extends CanvasLayer
 
 signal add_node_requested
 signal node_data_changed(node_data)
+signal jump_requested(percent)
+signal exit_requested
 
 @onready var add_button = $AddButton
 @onready var sidebar = $Sidebar
@@ -17,6 +19,24 @@ func _ready():
 	$Sidebar/VBoxContainer/SaveButton.pressed.connect(_on_save_pressed)
 	sidebar.visible = false
 	recycle_bin.visible = false
+	
+	_setup_exit_button()
+
+func _setup_exit_button():
+	var btn = Button.new()
+	btn.text = "X"
+	btn.modulate = Color.RED
+	
+	# Top Right Anchor
+	btn.layout_mode = 1 # Anchors
+	btn.anchors_preset = Control.PRESET_TOP_RIGHT
+	btn.offset_left = -40
+	btn.offset_bottom = 40
+	btn.offset_top = 10
+	btn.offset_right = -10
+	
+	btn.pressed.connect(func(): emit_signal("exit_requested"))
+	add_child(btn)
 
 func _on_add_button_pressed():
 	emit_signal("add_node_requested")

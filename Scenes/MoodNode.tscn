@@ -1,6 +1,6 @@
-[gd_scene load_steps=4 format=3 uid="uid://moodnode_scene_001"]
+[gd_scene load_steps=4 format=3 uid="uid://b3ksfryp6ktbu"]
 
-[ext_resource type="Script" path="res://Scripts/MoodNode.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://blroyly8mxqor" path="res://Scripts/MoodNode.gd" id="1_script"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_1"]
 size = Vector3(2, 2, 0.2)
@@ -10,6 +10,7 @@ size = Vector3(2, 2, 0.2)
 
 [node name="MoodNode" type="Area3D"]
 script = ExtResource("1_script")
+drag_threshold = 100
 
 [node name="Visual" type="MeshInstance3D" parent="."]
 mesh = SubResource("BoxMesh_1")
@@ -19,7 +20,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.15)
 pixel_size = 0.01
 text = "Node Name"
 font_size = 64
-outline_size = 12
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_1")
