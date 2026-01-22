@@ -4,21 +4,30 @@ signal add_node_requested
 signal node_data_changed(node_data)
 signal jump_requested(percent)
 signal exit_requested
+# New Signals
+signal delete_mode_toggled(active)
+signal delete_confirmed
 
 @onready var add_button = $ForegroundLayer/AddButton
+@onready var delete_mode_btn = $ForegroundLayer/DeleteModeButton
+@onready var delete_cancel_btn = $ForegroundLayer/DeleteCancelButton
+
 @onready var sidebar = $ForegroundLayer/Sidebar
 @onready var name_edit = $ForegroundLayer/Sidebar/VBoxContainer/NameEdit
 @onready var desc_edit = $ForegroundLayer/Sidebar/VBoxContainer/DescEdit
 @onready var recycling_bin = $ForegroundLayer/RecycleBin
 var current_node_data: Dictionary = {}
 var current_node_ref = null
-	# Add Background Color (since Viewport is transparent now)
-	# REMOVED: ColorRect blocks 3D view because CanvasLayers render after 3D.
-	
 
 func _ready():
 	add_button.pressed.connect(_on_add_button_pressed)
 	$ForegroundLayer/Sidebar/VBoxContainer/SaveButton.pressed.connect(_on_save_pressed)
+	
+	# Delete Mode Connections
+	delete_mode_btn.pressed.connect(_on_delete_mode_pressed)
+	delete_cancel_btn.pressed.connect(_on_delete_cancel_pressed)
+	delete_cancel_btn.visible = false
+	
 	sidebar.visible = false
 	recycling_bin.visible = false
 	
@@ -47,9 +56,31 @@ func _setup_exit_button():
 	btn.pressed.connect(func(): emit_signal("exit_requested"))
 	add_child(btn)
 
-
 func _on_add_button_pressed():
 	emit_signal("add_node_requested")
+
+func _on_delete_mode_pressed():
+	# This button acts as "Enter Mode" OR "Confirm Delete" depending on state
+	emit_signal("delete_mode_toggled", true) 
+
+func _on_delete_cancel_pressed():
+	emit_signal("delete_mode_toggled", false) # False = Cancel/Exit
+
+func set_delete_mode_state(is_active: bool, items_marked: int = 0):
+	delete_cancel_btn.visible = is_active
+	
+	if is_active:
+		add_button.visible = false
+		if items_marked > 0:
+			delete_mode_btn.text = "Confirm (%d)" % items_marked
+			delete_mode_btn.modulate = Color.RED
+		else:
+			delete_mode_btn.text = "Select Items"
+			delete_mode_btn.modulate = Color.WHITE
+	else:
+		add_button.visible = true
+		delete_mode_btn.text = "Delete Mode"
+		delete_mode_btn.modulate = Color.WHITE
 
 func show_sidebar(node_data: Dictionary, node_ref):
 	current_node_data = node_data

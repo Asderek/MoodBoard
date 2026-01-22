@@ -51,6 +51,38 @@ theme_override_styles/normal = SubResource("StyleBoxFlat_1")
 theme_override_styles/hover = SubResource("StyleBoxFlat_1")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_1")
 text = "+"
+theme_override_styles/normal = SubResource("StyleBoxFlat_1")
+theme_override_styles/hover = SubResource("StyleBoxFlat_1")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_1")
+
+[node name="DeleteModeButton" type="Button" parent="ForegroundLayer"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -280.0
+offset_top = -80.0
+offset_right = -160.0
+offset_bottom = -20.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "Delete Mode"
+
+[node name="DeleteCancelButton" type="Button" parent="ForegroundLayer"]
+visible = false
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -400.0
+offset_top = -80.0
+offset_right = -300.0
+offset_bottom = -20.0
+grow_horizontal = 0
+grow_vertical = 0
+text = "Cancel"
 
 [node name="Sidebar" type="PanelContainer" parent="ForegroundLayer"]
 anchors_preset = 11

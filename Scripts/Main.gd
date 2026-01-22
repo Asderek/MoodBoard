@@ -13,6 +13,9 @@ const DEBUG_DATA_PATH = "res://debug_data.json"
 
 # Data Structure 
 var mood_data = {}
+var selected_nodes: Array = []
+var nodes_marked_for_deletion: Array = []
+var is_delete_mode: bool = false
 
 # Grid Layout Configuration
 const GRID_COLS = 5
@@ -29,6 +32,7 @@ func _ready():
 	ui_scene.connect("add_node_requested", add_new_node)
 	ui_scene.connect("node_data_changed", func(_d): save_data())
 	ui_scene.connect("exit_requested", return_to_menu)
+	ui_scene.connect("delete_mode_toggled", _on_delete_mode_toggled)
 	
 	# Camera connection removed (no longer needed for rotation)
 
@@ -104,38 +108,50 @@ func _parse_json_file(file: FileAccess) -> Error:
 	return error
 
 func _unhandled_input(event):
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			_go_up_layer()
+	if event is InputEventMouseButton:
+		if event.pressed:
+			# PRESS EVENTS
+			if event.button_index == MOUSE_BUTTON_RIGHT:
+				_go_up_layer()
+			elif event.button_index == MOUSE_BUTTON_LEFT:
+				if event.double_click:
+					# Double Click on "Nothing" -> Create New Node
+					# Check distance to existing nodes to ensure we are in "empty space"
+					var mouse_pos = get_viewport().get_mouse_position()
+					var plane = Plane(Vector3.BACK, 0)
+					var from = camera.project_ray_origin(mouse_pos)
+					var dir = camera.project_ray_normal(mouse_pos)
+					
+					var world_pos = plane.intersects_ray(from, dir)
+					
+					if world_pos:
+						var is_safe_space = true
+						# Node Width is 2.0. Threshold = Width * 1.5 = 3.0
+						var safe_distance = 3.0 
+						
+						for child in node_root.get_children():
+							# Check against visible nodes (exclude fading ones if any?)
+							# Just check all direct children which are nodes
+							if child.position.distance_to(world_pos) < safe_distance:
+								is_safe_space = false
+								break
+						
+						if is_safe_space:
+							add_new_node()
+		
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			if event.double_click:
-				# Double Click on "Nothing" -> Create New Node
-				# Check distance to existing nodes to ensure we are in "empty space"
-				var mouse_pos = get_viewport().get_mouse_position()
-				var plane = Plane(Vector3.BACK, 0)
-				var from = camera.project_ray_origin(mouse_pos)
-				var dir = camera.project_ray_normal(mouse_pos)
-				
-				var world_pos = plane.intersects_ray(from, dir)
-				
-				if world_pos:
-					var is_safe_space = true
-					# Node Width is 2.0. Threshold = Width * 1.5 = 3.0
-					var safe_distance = 3.0 
-					
-					for child in node_root.get_children():
-						# Check against visible nodes (exclude fading ones if any?)
-						# Just check all direct children which are nodes
-						if child.position.distance_to(world_pos) < safe_distance:
-							is_safe_space = false
-							break
-					
-					if is_safe_space:
-						add_new_node()
-			
+			# RELEASE EVENTS
 			# Always close sidebar on any background click (single or double)
+			# Since MoodNode handles its own release event and consumes it,
+			# if we are here, it means we clicked on the background.
 			if ui_layer:
 				ui_layer.close_sidebar()
+			
+			# Guard: If we just selected a node (within 150ms), don't clear selection.
+			# This handles the case where the release event propagates despite being handled.
+			if Time.get_ticks_msec() - last_selection_time > 150:
+				clear_selection()
+
 
 func _go_up_layer():
 	if current_path_stack.is_empty():
@@ -167,7 +183,16 @@ var current_view_data: Dictionary = {}
 func _process(_delta):
 	pass # No continuous updates needed for grid
 
+func clear_selection():
+	if not selected_nodes.is_empty():
+		print("Main: clear_selection called. Count: ", selected_nodes.size())
+	for node in selected_nodes:
+		if is_instance_valid(node):
+			node.set_selected(false)
+	selected_nodes.clear()
+
 func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimType = AnimType.DEFAULT, focus_pos: Vector3 = Vector3.ZERO):
+	clear_selection()
 	current_view_data = parent_data
 	
 	# --- 0. PREPARE EXIT (Cleanup Old Layer) ---
@@ -422,27 +447,133 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 	exit_tween.chain().tween_callback(exit_root.queue_free)
 
 
-func _on_node_selected(node):
+
+var last_selection_time = 0
+
+func _on_node_selected(node, _is_multi):
+	last_selection_time = Time.get_ticks_msec()
+	
+	if is_delete_mode:
+		# Toggle "Marked" status
+		if node in nodes_marked_for_deletion:
+			node.set_marked_for_deletion(false)
+			nodes_marked_for_deletion.erase(node)
+		else:
+			node.set_marked_for_deletion(true)
+			nodes_marked_for_deletion.append(node)
+		
+		# Update UI
+		if ui_layer:
+			ui_layer.set_delete_mode_state(true, nodes_marked_for_deletion.size())
+		return
+
+	# Standard Selection Logic (Only if not in delete mode)
+	clear_selection()
+	node.set_selected(true)
+	selected_nodes.append(node)
+		
 	if ui_layer:
 		ui_layer.show_sidebar(node.node_data, node)
 
-func _on_node_drag_started(_node):
+func _on_delete_mode_toggled(active: bool):
+	if active:
+		if is_delete_mode and not nodes_marked_for_deletion.is_empty():
+			# If already active and has items -> This is CONFIRM
+			_execute_bulk_delete()
+		else:
+			# Enter Mode
+			is_delete_mode = true
+			clear_selection() # Clear normal selection
+			if ui_layer:
+				ui_layer.close_sidebar()
+				ui_layer.set_delete_mode_state(true, 0)
+	else:
+		# Cancel / Exit
+		_exit_delete_mode()
+
+func _exit_delete_mode():
+	is_delete_mode = false
+	# Clear marks
+	for node in nodes_marked_for_deletion:
+		if is_instance_valid(node):
+			node.set_marked_for_deletion(false)
+	nodes_marked_for_deletion.clear()
+	
+	if ui_layer:
+		ui_layer.set_delete_mode_state(false)
+
+func _execute_bulk_delete():
+	if nodes_marked_for_deletion.is_empty():
+		return
+		
+	if current_view_data.has("children"):
+		for n in nodes_marked_for_deletion:
+			if is_instance_valid(n):
+				current_view_data["children"].erase(n.node_data)
+				
+				# Animate deletion
+				var t = create_tween()
+				t.tween_property(n, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		
+		await get_tree().create_timer(0.25).timeout
+		
+		for n in nodes_marked_for_deletion:
+			if is_instance_valid(n):
+				n.queue_free()
+		
+		_exit_delete_mode() # Clear state
+		_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view
+		save_data()
+
+
+func _on_node_drag_started(node):
+	# If dragging an unselected node, select it exclusively (unless specific UX desired)
+	if node not in selected_nodes:
+		clear_selection()
+		node.set_selected(true)
+		selected_nodes.append(node)
+		
 	if ui_layer:
 		ui_layer.set_bin_visible(true)
 
 func _on_node_drag_ended(node):
 	# Check 2D Bin intersection via UI layer
 	if ui_layer and ui_layer.is_bin_hovered():
-		# Delete Node
+		# Identify nodes to delete
+		var nodes_to_delete = []
+		if node in selected_nodes:
+			nodes_to_delete = selected_nodes.duplicate()
+		else:
+			nodes_to_delete = [node]
+		
+		if nodes_to_delete.is_empty():
+			return
+
+		var data_changed = false
 		if current_view_data.has("children"):
-			# Animate deletion first
-			var t = create_tween()
-			t.tween_property(node, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-			await t.finished
-			node.queue_free() # Remove it from scene so it's not caught by _spawn_layer cleanup
-				
-			current_view_data["children"].erase(node.node_data)
-			_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view
+			for n in nodes_to_delete:
+				if is_instance_valid(n):
+					current_view_data["children"].erase(n.node_data)
+					
+					# Animate deletion
+					var t = create_tween()
+					t.tween_property(n, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+					
+					# Queue free after animation (we can just let them finish but we want to refresh grid)
+					# If we refresh grid immediately, they disappear.
+					# Let's refresh AFTER all are gone?
+			
+			data_changed = true
+			
+			# Visual cleanup wait
+			await get_tree().create_timer(0.25).timeout
+			
+			for n in nodes_to_delete:
+				if is_instance_valid(n):
+					n.queue_free()
+			
+			clear_selection() # Clear selection logic
+			_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view layout
 			save_data()
 				
 	if ui_layer:
