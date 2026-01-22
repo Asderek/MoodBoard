@@ -22,7 +22,16 @@ const GRID_COLS = 5
 const GRID_SPACING_X = 2.5
 const GRID_SPACING_Y = 2.5
 
+
 var ui_layer = null
+enum LayoutMode { FREE, TIMELINE }
+var current_layout_mode = LayoutMode.FREE
+
+const TIMELINE_LANE_HEIGHT = 4.0
+const TIMELINE_ITEM_WIDTH = 3.0
+
+var timeline_lines_mesh: MeshInstance3D = null
+
 
 func _ready():
 	var ui_scene = preload("res://Scenes/UI.tscn").instantiate()
@@ -33,6 +42,20 @@ func _ready():
 	ui_scene.connect("node_data_changed", func(_d): save_data())
 	ui_scene.connect("exit_requested", return_to_menu)
 	ui_scene.connect("delete_mode_toggled", _on_delete_mode_toggled)
+	
+	# View Mode Connections
+	ui_scene.connect("view_mode_changed", _on_view_mode_changed)
+	ui_scene.connect("align_grid_requested", _on_align_grid_requested)
+	
+	# Setup Timeline Visuals
+	timeline_lines_mesh = MeshInstance3D.new()
+	timeline_lines_mesh.mesh = ImmediateMesh.new()
+	var mat = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1, 1, 1, 0.3)
+	mat.vertex_color_use_as_albedo = true
+	timeline_lines_mesh.material_override = mat
+	add_child(timeline_lines_mesh)
 	
 	# Camera connection removed (no longer needed for rotation)
 
@@ -64,7 +87,7 @@ func save_data():
 	if file:
 		var json = JSON.stringify(mood_data)
 		file.store_string(json)
-		print("Saved to: ", Global.current_file_path)
+
 
 func load_data():
 	# 1. Tutorial Mode / Debug
@@ -169,8 +192,46 @@ func add_new_node():
 		var new_node_data = {
 			"name": "New Idea",
 			"color": Color.from_hsv(randf(), 0.7, 0.9).to_html(),
-			"children": []
+			"children": [],
+			"created_at": Time.get_unix_time_from_system(),
+			"timeline_id": 0,
+			"timeline_index": 9999, # Put at end
+			"pos_y": 0.0
 		}
+		
+		# Prevent Overlap in Free Mode
+		if current_layout_mode == LayoutMode.FREE:
+			var safe_pos = Vector2.ZERO
+			var offset = 0
+			var found_safe = false
+			
+			# Check against existing nodes
+			# Simple spiral or linear offset search
+			while not found_safe:
+				found_safe = true
+				for child_data in current_view_data["children"]:
+					var cx = child_data.get("pos_x", 0.0)
+					var cy = child_data.get("pos_y", 0.0)
+					
+					# Distance Threshold (Node width approx 2.5)
+					if Vector2(cx, cy).distance_to(safe_pos) < 2.5:
+						found_safe = false
+						break
+				
+				if not found_safe:
+					offset += 1
+					# Spiraling out: Right, Down, Left, Up... simplified to just random or linear spread for now
+					# Or just stacking right
+					safe_pos.x += 2.6 
+					if safe_pos.x > 10.0: # Wrap line
+						safe_pos.x = 0
+						safe_pos.y -= 2.6
+			
+			new_node_data["pos_x"] = safe_pos.x
+			new_node_data["pos_y"] = safe_pos.y
+		
+		# If in Free Mode, try to place it near center or intelligently?
+		# Grid mode will auto-arrange.
 		current_view_data["children"].append(new_node_data)
 		_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view
 		save_data()
@@ -185,7 +246,7 @@ func _process(_delta):
 
 func clear_selection():
 	if not selected_nodes.is_empty():
-		print("Main: clear_selection called. Count: ", selected_nodes.size())
+		pass
 	for node in selected_nodes:
 		if is_instance_valid(node):
 			node.set_selected(false)
@@ -238,45 +299,28 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 			t.tween_property(node, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(0.6)
 		else:
 			# ANCESTOR (Already there) or DEFAULT (Refresh): Spawn visible immediately
-
 			node.scale = Vector3.ONE
 
 	# --- 2. NEW GRID CONTENT (Children) ---
 	var children_data = parent_data.get("children", [])
 	
-	# Dynamic Grid Calculation
-	var is_mobile = OS.has_feature("mobile")
-	var count = children_data.size()
+	# Determine positions based on Layout Mode
+	var positions = []
+	match current_layout_mode:
+		LayoutMode.TIMELINE:
+			positions = _calculate_timeline_layout(children_data)
+			_draw_timeline_visuals(children_data)
+		LayoutMode.FREE:
+			positions = _calculate_free_layout(children_data)
+			timeline_lines_mesh.mesh.clear_surfaces() # Hide lines
 	
-	# base_dim reflects the "Square" size (1x1, 2x2...) before clamping
-	var base_dim = 1
-	if count <= 1:
-		base_dim = 1
-	elif count <= 4:
-		base_dim = 2
-	elif count <= 9:
-		base_dim = 3
-	elif count <= 16:
-		base_dim = 4
-	elif count <= 25:
-		base_dim = 5
-	else:
-		base_dim = 6
+	# Fallback/Safety: If we somehow requested GRID (via align which sets FREE), 
+	# layout is handled by align function before calling spawn, or FREE handles it.
 	
-	var layout_cols = 1
-	var layout_rows = 1
-	
-	if is_mobile:
-		# Mobile: Fixed Width (Max 3 Cols), Grow Down
-		layout_cols = min(3, base_dim)
-		# layout_rows is derived
-	else:
-		# PC: Fixed Height (Max 6 Rows), Grow Right
-		layout_rows = min(6, base_dim)
-		# layout_cols is derived
-
-	var idx = 0
-	for data in children_data:
+	for i in range(children_data.size()):
+		var data = children_data[i]
+		var target_pos = positions[i]
+		
 		var n = MoodNodeScene.instantiate()
 		node_root.add_child(n)
 		n.setup(data)
@@ -285,68 +329,34 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		n.connect("node_drag_started", _on_node_drag_started)
 		n.connect("node_drag_ended", _on_node_drag_ended)
 		
-		var col = 0
-		var row = 0
-		var x_pos = 0.0
-		var y_pos = 0.0
+		n.position = target_pos
 		
-		# Grid Layout Math
-		if is_mobile:
-			# Row-Major: Fill X, then Y
-			col = idx % layout_cols
-			row = idx / layout_cols
-			
-			# Centering X only? Or both? Standard vertical list usually centers X.
-			var total_w = layout_cols * GRID_SPACING_X
-			var start_x2 = -(total_w / 2.0) + (GRID_SPACING_X / 2.0)
-			x_pos = start_x2 + (col * GRID_SPACING_X)
-			y_pos = -(row * GRID_SPACING_Y)
-		else:
-			# PC: Column-Major: Fill Y, then X
-			row = idx % layout_rows
-			col = idx / layout_rows
-			
-			# Calculate total columns for centering
-			var total_cols_needed = ceil(float(count) / float(layout_rows))
-			var total_w = total_cols_needed * GRID_SPACING_X
-			var start_x2 = -(total_w / 2.0) + (GRID_SPACING_X / 2.0)
-			
-			x_pos = start_x2 + (col * GRID_SPACING_X)
-			y_pos = -(row * GRID_SPACING_Y)
-		
-		n.position = Vector3(x_pos, y_pos, 0)
-		
-		# Entry Animation
+		# Entry Animation (Same logic as before)
 		if anim_type == AnimType.TUNNEL_IN:
-			# Drill Down: New nodes come from distance (Deep)
 			n.scale = Vector3.ZERO
 			n.position.z = -50.0
 			var tween = create_tween()
 			tween.set_parallel(true)
 			tween.tween_property(n, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			tween.tween_property(n, "position:z", 0.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-			
 		elif anim_type == AnimType.TUNNEL_OUT:
-			# Go Back: New nodes come from Camera (Behind/Close)
-			# Start Big and Close
 			n.scale = Vector3.ONE * 3.0
 			n.position.z = 20.0 
 			if n.has_method("set_label_opacity"):
 				n.set_label_opacity(0.0)
 				n.fade_label(1.0, 0.5)
-			
 			var tween = create_tween()
 			tween.set_parallel(true)
 			tween.tween_property(n, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 			tween.tween_property(n, "position:z", 0.0, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-			
 		else:
-			# Default Pop
 			n.scale = Vector3.ZERO
 			var tween = create_tween()
 			tween.tween_property(n, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(randf() * 0.2)
-		
-		idx += 1
+
+
+
+
 		
 	# Animate Exit Root
 	var exit_tween = create_tween().set_parallel(true)
@@ -521,6 +531,7 @@ func _execute_bulk_delete():
 			if is_instance_valid(n):
 				n.queue_free()
 		
+		_normalize_timeline_ids() # Collapse gaps
 		_exit_delete_mode() # Clear state
 		_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view
 		save_data()
@@ -573,11 +584,21 @@ func _on_node_drag_ended(node):
 					n.queue_free()
 			
 			clear_selection() # Clear selection logic
+			_normalize_timeline_ids() # Collapse gaps
 			_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view layout
 			save_data()
 				
 	if ui_layer:
 		ui_layer.set_bin_visible(false)
+		
+	# Save Position Update (if free mode)
+	if node:
+		if current_layout_mode == LayoutMode.FREE:
+			node.node_data["pos_x"] = node.position.x
+			node.node_data["pos_y"] = node.position.y
+			save_data()
+		elif current_layout_mode == LayoutMode.TIMELINE:
+			_handle_timeline_drop(node)
 
 
 
@@ -593,3 +614,365 @@ func _enter_node(node):
 func return_to_menu():
 	save_data()
 	get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
+
+func _calculate_grid_layout(nodes_data: Array) -> Array:
+	var positions = []
+	var is_mobile = OS.has_feature("mobile")
+	var count = nodes_data.size()
+	
+	var base_dim = 1
+	if count <= 1: base_dim = 1
+	elif count <= 4: base_dim = 2
+	elif count <= 9: base_dim = 3
+	elif count <= 16: base_dim = 4
+	elif count <= 25: base_dim = 5
+	else: base_dim = 6
+	
+	var layout_cols = 1
+	var layout_rows = 1
+	
+	if is_mobile:
+		layout_cols = min(3, base_dim)
+	else:
+		layout_rows = min(6, base_dim)
+
+	for idx in range(count):
+		var col = 0
+		var row = 0
+		var x_pos = 0.0
+		var y_pos = 0.0
+		
+		if is_mobile:
+			col = idx % layout_cols
+			row = idx / layout_cols
+			var total_w = layout_cols * GRID_SPACING_X
+			var start_x = -(total_w / 2.0) + (GRID_SPACING_X / 2.0)
+			x_pos = start_x + (col * GRID_SPACING_X)
+			y_pos = -(row * GRID_SPACING_Y)
+		else:
+			row = idx % layout_rows
+			col = idx / layout_rows
+			var total_cols_needed = ceil(float(count) / float(layout_rows))
+			var total_w = total_cols_needed * GRID_SPACING_X
+			var start_x = -(total_w / 2.0) + (GRID_SPACING_X / 2.0)
+			x_pos = start_x + (col * GRID_SPACING_X)
+			y_pos = -(row * GRID_SPACING_Y)
+		
+		positions.append(Vector3(x_pos, y_pos, 0))
+	return positions
+
+func _normalize_timeline_ids():
+	if not current_view_data.has("children"):
+		return
+		
+	var children = current_view_data["children"]
+	if children.is_empty():
+		return
+		
+	# 1. Collect all unique IDs presently used
+	var used_ids = []
+	for child in children:
+		var tid = int(child.get("timeline_id", 0))
+		if tid not in used_ids:
+			used_ids.append(tid)
+	
+	used_ids.sort()
+	
+	# 2. Map Old -> New (0, 1, 2...)
+	var id_map = {}
+	for i in range(used_ids.size()):
+		id_map[used_ids[i]] = i
+		
+	# 3. Apply
+	for child in children:
+		var old_id = int(child.get("timeline_id", 0))
+		if id_map.has(old_id):
+			child["timeline_id"] = id_map[old_id]
+
+func _calculate_timeline_layout(nodes_data: Array) -> Array:
+	var positions = []
+	var count = nodes_data.size()
+	positions.resize(count)
+	
+	# 1. Group by Timeline ID
+	var map = [] # { index: int, data: dict }
+	var max_timeline_id = 0
+	
+	for i in range(count):
+		map.append({ "index": i, "data": nodes_data[i] })
+		var tid = int(nodes_data[i].get("timeline_id", 0))
+		if tid > max_timeline_id:
+			max_timeline_id = tid
+		
+	# Sort map: Primary = timeline_id, Secondary = timeline_index
+	map.sort_custom(func(a, b):
+		var id_a = a.data.get("timeline_id", 0)
+		var id_b = b.data.get("timeline_id", 0)
+		if id_a != id_b:
+			return id_a < id_b 
+		var idx_a = a.data.get("timeline_index", 0)
+		var idx_b = b.data.get("timeline_index", 0)
+		return idx_a < idx_b
+	)
+	
+	# 2. Iterate and assign positions
+	var lane_nodes = {} 
+	for item in map:
+		var lane = item.data.get("timeline_id", 0)
+		if not lane_nodes.has(lane): lane_nodes[lane] = []
+		lane_nodes[lane].append(item)
+	
+	# --- LAYOUT LOGIC ---
+	
+	# A. Determine Max Width of "Main" Timelines (Everything except the last one)
+	# The Aux timeline (last one) should be roughly the size of the longest main timeline.
+	
+	var max_main_width = 0
+	
+	var all_lanes = lane_nodes.keys()
+	all_lanes.sort()
+	
+	# Check all lanes EXCEPT the last one (if there is more than 1)
+	if all_lanes.size() > 1:
+		for lane in all_lanes:
+			if lane != max_timeline_id:
+				var w = lane_nodes[lane].size()
+				if w > max_main_width:
+					max_main_width = w
+	else:
+		# If only one timeline exists, treat it as Main? Or Aux?
+		# If only 1, it's just a board. Let's default to a reasonable width or just Main width.
+		# If max_main_width stays 0, subsequent logic handles min.
+		if not all_lanes.is_empty() and lane_nodes.has(all_lanes[0]):
+			max_main_width = lane_nodes[all_lanes[0]].size()
+	
+	# Ensure a minimum width so it doesn't wrap aggressively
+	# "Slightly bigger" -> Let's add padding + satisfy min 3.
+	var constraint_width = max(3, max_main_width)
+	
+	# Clear Cache for Visuals
+	_cached_timeline_lines.clear()
+	
+	# Track Y offsets dynamically because wrapping increases height
+	var current_y_cursor = 0.0
+	
+	# We must iterate lanes in order 0..max_id to stack them correcty
+	for lane in all_lanes:
+		var items = lane_nodes[lane]
+		var row_count = items.size()
+		
+		# --- Wrapping Logic for AUX TIMELINE (Last one) ---
+		var is_aux = (lane == max_timeline_id) and (max_timeline_id > 0)
+		
+		# If it's the aux timeline, we use wrapping
+		var items_per_row = row_count # Default: No wrap
+		
+		if is_aux:
+			items_per_row = constraint_width
+			
+		# Calculate rows needed for this lane
+		var lane_rows = ceil(float(row_count) / float(items_per_row))
+		if lane_rows < 1: lane_rows = 1
+		
+		# Draw items
+		for i in range(row_count):
+			var item = items[i]
+			
+			# Grid coordinate within this lane
+			var col = i % items_per_row
+			var row_offset = floor(i / items_per_row)
+			
+			# X Position
+			# How many items in *this specific* row_offset?
+			var is_last_row = (row_offset == lane_rows - 1)
+			# Standard is items_per_row. But if last row, it's remainder.
+			# BUT: If row_count is exact multiple, remainder is 0, so checked items_per_row logic.
+			
+			var items_in_this_row = items_per_row 
+			if is_last_row:
+				var rem = row_count % items_per_row
+				if rem > 0: items_in_this_row = rem
+			
+			var row_w = items_in_this_row * TIMELINE_ITEM_WIDTH
+			var start_x = -(row_w / 2.0) + (TIMELINE_ITEM_WIDTH / 2.0)
+			
+			var x = start_x + (col * TIMELINE_ITEM_WIDTH)
+			var y = current_y_cursor - (row_offset * TIMELINE_LANE_HEIGHT)
+			
+			positions[item.index] = Vector3(x, y, 0)
+			
+			# CACHE VISUAL LINE (Only once per row)
+			if col == 0:
+				# It's the start of a row. Calculate layout for this row.
+				var line_start_x = start_x - (TIMELINE_ITEM_WIDTH * 0.5) - 2.0
+				var line_end_x = start_x + ((items_in_this_row - 1) * TIMELINE_ITEM_WIDTH) + (TIMELINE_ITEM_WIDTH * 0.5) + 2.0
+				
+				_cached_timeline_lines.append({
+					"start": Vector3(line_start_x, y, -0.1),
+					"end": Vector3(line_end_x, y, -0.1),
+					"is_ghost": false
+				})
+
+		# Advance Cursor for next lane
+		current_y_cursor -= (lane_rows * TIMELINE_LANE_HEIGHT)
+	
+	# Add Ghost Line at bottom (for potential new lane)
+	var gh_y = current_y_cursor
+	var gh_width = 20.0
+	_cached_timeline_lines.append({
+		"start": Vector3(-gh_width, gh_y, -0.1),
+		"end": Vector3(gh_width, gh_y, -0.1),
+		"is_ghost": true
+	})
+			
+	return positions
+
+func _handle_timeline_drop(node):
+	var drop_y = node.position.y
+	
+	# 1. Analyze existing lane positions from live nodes
+	var lane_y_ranges = {} # { lane_id: {min: y, max: y} }
+	var max_existing_id = -1
+	
+	for child in node_root.get_children():
+		if child == node: continue 
+		if not child.get("node_data"): continue
+		
+		var tid = int(child.node_data.get("timeline_id", 0))
+		var y = child.position.y
+		
+		if tid > max_existing_id: max_existing_id = tid
+		
+		if not lane_y_ranges.has(tid):
+			lane_y_ranges[tid] = { "min": y, "max": y }
+		else:
+			lane_y_ranges[tid].min = min(lane_y_ranges[tid].min, y)
+			lane_y_ranges[tid].max = max(lane_y_ranges[tid].max, y)
+			
+	var target_lane = 0
+	
+	if lane_y_ranges.is_empty():
+		target_lane = 0
+	else:
+		# Use distances logic from before
+		var best_lane = 0
+		var min_dist = 999999.0
+		var sorted_ids = lane_y_ranges.keys()
+		sorted_ids.sort()
+		
+		for tid in sorted_ids:
+			var range_vals = lane_y_ranges[tid]
+			var dist = 0.0
+			if drop_y > range_vals.max: dist = drop_y - range_vals.max
+			elif drop_y < range_vals.min: dist = range_vals.min - drop_y
+			else: dist = 0.0
+			
+			if dist < min_dist:
+				min_dist = dist
+				best_lane = tid
+				
+		target_lane = best_lane
+		
+		# New Lane Logic (Bottom)
+		if best_lane == max_existing_id:
+			var bottom_min = lane_y_ranges[max_existing_id].min
+			if drop_y < (bottom_min - 3.5):
+				target_lane = max_existing_id + 1
+	
+	# 2. Update Timeline ID logic
+	var drop_x = node.position.x
+	var nodes_in_lane = [] 
+	
+	for child in node_root.get_children():
+		if not child.get("node_data"): continue
+		
+		var n_data = child.node_data
+		var n_x = child.position.x
+		var n_lane = int(n_data.get("timeline_id", 0))
+		
+		if child == node:
+			nodes_in_lane.append({ "data": n_data, "x": drop_x })
+			n_data["timeline_id"] = target_lane
+		else:
+			if n_lane == target_lane:
+				nodes_in_lane.append({ "data": n_data, "x": n_x })
+	
+	# 3. Sort and Re-Index
+	nodes_in_lane.sort_custom(func(a,b): return a.x < b.x)
+	
+	for i in range(nodes_in_lane.size()):
+		var item = nodes_in_lane[i]
+		item.data["timeline_index"] = i
+		item.data["timeline_id"] = target_lane
+		
+	# Refresh
+	_normalize_timeline_ids() 
+	_spawn_layer(current_view_data, Vector3.ZERO)
+	save_data()
+
+func _calculate_free_layout(nodes_data: Array) -> Array:
+	var positions = []
+	for data in nodes_data:
+		var x = data.get("pos_x", null)
+		var y = data.get("pos_y", null)
+		
+		if x == null or y == null:
+			positions.append(Vector3.ZERO) 
+		else:
+			positions.append(Vector3(x, y, 0))
+			
+	# Fix placeholders
+	var fallback_grid = _calculate_grid_layout(nodes_data)
+	for i in range(positions.size()):
+		if positions[i] == Vector3.ZERO and (nodes_data[i].get("pos_x") == null):
+			positions[i] = fallback_grid[i]
+			
+	return positions
+
+func _on_view_mode_changed(mode_name: String):
+	match mode_name:
+		"FREE": current_layout_mode = LayoutMode.FREE
+		"TIMELINE": current_layout_mode = LayoutMode.TIMELINE
+	_spawn_layer(current_view_data, Vector3.ZERO)
+
+var _cached_timeline_lines = []
+
+func _draw_timeline_visuals(nodes_data: Array):
+	var mesh = timeline_lines_mesh.mesh as ImmediateMesh
+	mesh.clear_surfaces()
+	
+	if current_layout_mode != LayoutMode.TIMELINE:
+		return
+
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	
+	for line in _cached_timeline_lines:
+		var color = Color(1, 1, 1, 0.2)
+		if line.get("is_ghost", false):
+			color = Color(1, 1, 1, 0.1)
+			
+		mesh.surface_set_color(color)
+		mesh.surface_add_vertex(line.start)
+		mesh.surface_add_vertex(line.end)
+	
+	mesh.surface_end()
+
+func _notification(what):
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		save_data()
+		get_tree().quit()
+
+func _on_align_grid_requested():
+	# Force align to grid and SAVE those positions (essentially applying grid layout to free mode)
+	var grid_pos = _calculate_grid_layout(current_view_data.get("children", []))
+	var children = current_view_data.get("children", [])
+	for i in range(children.size()):
+		children[i]["pos_x"] = grid_pos[i].x
+		children[i]["pos_y"] = grid_pos[i].y
+	
+	current_layout_mode = LayoutMode.FREE # Switch to Free so they stay there
+	if ui_layer:
+		ui_layer._set_view_mode("FREE") # Update UI to reflect we are in Free mode (but aligned)
+		
+	_spawn_layer(current_view_data, Vector3.ZERO)
+	save_data()

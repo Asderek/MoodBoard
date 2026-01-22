@@ -43,6 +43,17 @@ func update_visuals():
 	mat.metallic = 0.1
 	visual_mesh.material_override = mat
 
+func set_color(color: Color):
+	target_color = color
+	node_data["color"] = color.to_html() # Sync local data
+	
+	if visual_mesh.material_override:
+		visual_mesh.material_override.albedo_color = target_color
+	else:
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = target_color
+		visual_mesh.material_override = mat
+
 func _ready():
 	original_scale = scale
 	# Ensure label handles multi-line nicely

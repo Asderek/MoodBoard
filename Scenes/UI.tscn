@@ -84,6 +84,36 @@ grow_horizontal = 0
 grow_vertical = 0
 text = "Cancel"
 
+[node name="ViewControls" type="HBoxContainer" parent="ForegroundLayer"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -200.0
+offset_top = 20.0
+offset_right = 200.0
+offset_bottom = 60.0
+grow_horizontal = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="FreeBtn" type="Button" parent="ForegroundLayer/ViewControls"]
+layout_mode = 2
+toggle_mode = true
+button_pressed = true
+text = "Free"
+
+[node name="TimelineBtn" type="Button" parent="ForegroundLayer/ViewControls"]
+layout_mode = 2
+toggle_mode = true
+text = "Timeline"
+
+[node name="VSeparator" type="VSeparator" parent="ForegroundLayer/ViewControls"]
+layout_mode = 2
+
+[node name="AlignBtn" type="Button" parent="ForegroundLayer/ViewControls"]
+layout_mode = 2
+text = "Align Grid"
+
 [node name="Sidebar" type="PanelContainer" parent="ForegroundLayer"]
 anchors_preset = 11
 anchor_left = 1.0
@@ -122,6 +152,16 @@ custom_minimum_size = Vector2(0, 150)
 layout_mode = 2
 placeholder_text = "Description..."
 wrap_mode = 1
+
+[node name="ColorLabel" type="Label" parent="ForegroundLayer/Sidebar/VBoxContainer"]
+layout_mode = 2
+text = "Color:"
+
+[node name="ColorPickerButton" type="ColorPickerButton" parent="ForegroundLayer/Sidebar/VBoxContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Pick Color"
+edit_alpha = false
 
 [node name="SaveButton" type="Button" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 layout_mode = 2
