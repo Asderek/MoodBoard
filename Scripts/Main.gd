@@ -28,10 +28,14 @@ func _ready():
 	ui_layer = ui_scene
 	ui_scene.connect("add_node_requested", add_new_node)
 	ui_scene.connect("node_data_changed", func(_d): save_data())
-	ui_scene.connect("node_data_changed", func(_d): save_data())
 	ui_scene.connect("exit_requested", return_to_menu)
 	
 	# Camera connection removed (no longer needed for rotation)
+
+	# Camera connection removed (no longer needed for rotation)
+	
+	# Enable Transparent BG so UI BackgroundLayer (Layer -1) is visible behind 3D nodes
+	# get_viewport().transparent_bg = true # REVERTED: Causes occlusion issues with 2D layers
 	
 	load_data()
 	
@@ -148,11 +152,12 @@ func add_new_node():
 	if current_view_data.has("children"):
 		var new_node_data = {
 			"name": "New Idea",
-			"color": Color.from_hsv(randf(), 0.7, 0.9),
+			"color": Color.from_hsv(randf(), 0.7, 0.9).to_html(),
 			"children": []
 		}
 		current_view_data["children"].append(new_node_data)
 		_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view
+		save_data()
 
 
 enum AnimType { DEFAULT, TUNNEL_IN, TUNNEL_OUT }
@@ -214,6 +219,37 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 	# --- 2. NEW GRID CONTENT (Children) ---
 	var children_data = parent_data.get("children", [])
 	
+	# Dynamic Grid Calculation
+	var is_mobile = OS.has_feature("mobile")
+	var count = children_data.size()
+	
+	# base_dim reflects the "Square" size (1x1, 2x2...) before clamping
+	var base_dim = 1
+	if count <= 1:
+		base_dim = 1
+	elif count <= 4:
+		base_dim = 2
+	elif count <= 9:
+		base_dim = 3
+	elif count <= 16:
+		base_dim = 4
+	elif count <= 25:
+		base_dim = 5
+	else:
+		base_dim = 6
+	
+	var layout_cols = 1
+	var layout_rows = 1
+	
+	if is_mobile:
+		# Mobile: Fixed Width (Max 3 Cols), Grow Down
+		layout_cols = min(3, base_dim)
+		# layout_rows is derived
+	else:
+		# PC: Fixed Height (Max 6 Rows), Grow Right
+		layout_rows = min(6, base_dim)
+		# layout_cols is derived
+
 	var idx = 0
 	for data in children_data:
 		var n = MoodNodeScene.instantiate()
@@ -224,14 +260,34 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		n.connect("node_drag_started", _on_node_drag_started)
 		n.connect("node_drag_ended", _on_node_drag_ended)
 		
-		# Grid Layout Logic
-		var col = idx % GRID_COLS
-		var row = idx / GRID_COLS
+		var col = 0
+		var row = 0
+		var x_pos = 0.0
+		var y_pos = 0.0
 		
-		# Centering offset (optional)
-		var start_x2 = -(GRID_COLS * GRID_SPACING_X) / 2.0 + GRID_SPACING_X / 2.0
-		var x_pos = start_x2 + (col * GRID_SPACING_X)
-		var y_pos = -(row * GRID_SPACING_Y) # Grow downwards
+		# Grid Layout Math
+		if is_mobile:
+			# Row-Major: Fill X, then Y
+			col = idx % layout_cols
+			row = idx / layout_cols
+			
+			# Centering X only? Or both? Standard vertical list usually centers X.
+			var total_w = layout_cols * GRID_SPACING_X
+			var start_x2 = -(total_w / 2.0) + (GRID_SPACING_X / 2.0)
+			x_pos = start_x2 + (col * GRID_SPACING_X)
+			y_pos = -(row * GRID_SPACING_Y)
+		else:
+			# PC: Column-Major: Fill Y, then X
+			row = idx % layout_rows
+			col = idx / layout_rows
+			
+			# Calculate total columns for centering
+			var total_cols_needed = ceil(float(count) / float(layout_rows))
+			var total_w = total_cols_needed * GRID_SPACING_X
+			var start_x2 = -(total_w / 2.0) + (GRID_SPACING_X / 2.0)
+			
+			x_pos = start_x2 + (col * GRID_SPACING_X)
+			y_pos = -(row * GRID_SPACING_Y)
 		
 		n.position = Vector3(x_pos, y_pos, 0)
 		
@@ -375,9 +431,21 @@ func _on_node_drag_started(_node):
 		ui_layer.set_bin_visible(true)
 
 func _on_node_drag_ended(node):
+	# Check 2D Bin intersection via UI layer
+	if ui_layer and ui_layer.is_bin_hovered():
+		# Delete Node
+		if current_view_data.has("children"):
+			# Animate deletion first
+			var t = create_tween()
+			t.tween_property(node, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+			await t.finished
+			node.queue_free() # Remove it from scene so it's not caught by _spawn_layer cleanup
+				
+			current_view_data["children"].erase(node.node_data)
+			_spawn_layer(current_view_data, Vector3.ZERO) # Refresh view
+			save_data()
+				
 	if ui_layer:
-		if ui_layer.is_bin_hovered():
-			pass # Handle delete? With virtual scroll, deleting from list is trickier.
 		ui_layer.set_bin_visible(false)
 
 

@@ -1,26 +1,35 @@
-extends CanvasLayer
+extends Control
 
 signal add_node_requested
 signal node_data_changed(node_data)
 signal jump_requested(percent)
 signal exit_requested
 
-@onready var add_button = $AddButton
-@onready var sidebar = $Sidebar
-@onready var name_edit = $Sidebar/VBoxContainer/NameEdit
-@onready var desc_edit = $Sidebar/VBoxContainer/DescEdit
-@onready var recycle_bin = $RecycleBin
-
+@onready var add_button = $ForegroundLayer/AddButton
+@onready var sidebar = $ForegroundLayer/Sidebar
+@onready var name_edit = $ForegroundLayer/Sidebar/VBoxContainer/NameEdit
+@onready var desc_edit = $ForegroundLayer/Sidebar/VBoxContainer/DescEdit
+@onready var recycling_bin = $ForegroundLayer/RecycleBin
 var current_node_data: Dictionary = {}
-var current_node_ref = null # To update visuals in real-time if needed? Or just data.
+var current_node_ref = null
+	# Add Background Color (since Viewport is transparent now)
+	# REMOVED: ColorRect blocks 3D view because CanvasLayers render after 3D.
+	
 
 func _ready():
 	add_button.pressed.connect(_on_add_button_pressed)
-	$Sidebar/VBoxContainer/SaveButton.pressed.connect(_on_save_pressed)
+	$ForegroundLayer/Sidebar/VBoxContainer/SaveButton.pressed.connect(_on_save_pressed)
 	sidebar.visible = false
-	recycle_bin.visible = false
+	recycling_bin.visible = false
 	
 	_setup_exit_button()
+
+func is_bin_hovered() -> bool:
+	if not recycling_bin.visible: return false
+	return recycling_bin.get_global_rect().has_point(get_global_mouse_position())
+
+func set_bin_visible(visible: bool):
+	recycling_bin.visible = visible
 
 func _setup_exit_button():
 	var btn = Button.new()
@@ -37,6 +46,7 @@ func _setup_exit_button():
 	
 	btn.pressed.connect(func(): emit_signal("exit_requested"))
 	add_child(btn)
+
 
 func _on_add_button_pressed():
 	emit_signal("add_node_requested")
@@ -68,11 +78,3 @@ func _on_save_pressed():
 			print("Node ref missing update_visuals method")
 	else:
 		print("No current node ref to update")
-
-func set_bin_visible(is_visible: bool):
-	recycle_bin.visible = is_visible
-
-func is_bin_hovered() -> bool:
-	if not recycle_bin.visible: return false
-	var mouse_pos = recycle_bin.get_global_mouse_position()
-	return recycle_bin.get_global_rect().has_point(mouse_pos)

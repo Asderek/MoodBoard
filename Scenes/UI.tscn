@@ -21,10 +21,20 @@ corner_radius_bottom_right = 0
 corner_radius_bottom_left = 0
 corner_radius_top_left = 0
 
-[node name="UI" type="CanvasLayer"]
+[node name="UI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
 script = ExtResource("1_script")
 
-[node name="AddButton" type="Button" parent="."]
+[node name="ForegroundLayer" type="CanvasLayer" parent="."]
+layer = 1
+
+[node name="AddButton" type="Button" parent="ForegroundLayer"]
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
@@ -42,7 +52,7 @@ theme_override_styles/hover = SubResource("StyleBoxFlat_1")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_1")
 text = "+"
 
-[node name="Sidebar" type="PanelContainer" parent="."]
+[node name="Sidebar" type="PanelContainer" parent="ForegroundLayer"]
 anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
@@ -51,57 +61,61 @@ offset_left = -300.0
 grow_horizontal = 0
 grow_vertical = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="Sidebar"]
+[node name="VBoxContainer" type="VBoxContainer" parent="ForegroundLayer/Sidebar"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Label" type="Label" parent="Sidebar/VBoxContainer"]
+[node name="Label" type="Label" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Properties"
 horizontal_alignment = 1
 
-[node name="NameLabel" type="Label" parent="Sidebar/VBoxContainer"]
+[node name="NameLabel" type="Label" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 layout_mode = 2
 text = "Name:"
 
-[node name="NameEdit" type="TextEdit" parent="Sidebar/VBoxContainer"]
+[node name="NameEdit" type="TextEdit" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 placeholder_text = "Node Name"
 wrap_mode = 1
 
-[node name="DescLabel" type="Label" parent="Sidebar/VBoxContainer"]
+[node name="DescLabel" type="Label" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 layout_mode = 2
 text = "Description:"
 
-[node name="DescEdit" type="TextEdit" parent="Sidebar/VBoxContainer"]
+[node name="DescEdit" type="TextEdit" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 custom_minimum_size = Vector2(0, 150)
 layout_mode = 2
 placeholder_text = "Description..."
 wrap_mode = 1
 
-[node name="SaveButton" type="Button" parent="Sidebar/VBoxContainer"]
+[node name="SaveButton" type="Button" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 layout_mode = 2
 text = "Save Changes"
 
-[node name="RecycleBin" type="Panel" parent="."]
-anchors_preset = 2
+[node name="RecycleBin" type="Panel" parent="ForegroundLayer"]
+anchors_preset = 7
+anchor_left = 0.5
 anchor_top = 1.0
+anchor_right = 0.5
 anchor_bottom = 1.0
+offset_left = -100.0
 offset_top = -100.0
-offset_right = 150.0
+offset_right = 100.0
+offset_bottom = -20.0
+grow_horizontal = 2
 grow_vertical = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_Bin")
 
-[node name="Label" type="Label" parent="RecycleBin"]
+[node name="Label" type="Label" parent="ForegroundLayer/RecycleBin"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_font_sizes/font_size = 20
 text = "Drop to Delete"
 horizontal_alignment = 1
 vertical_alignment = 1
