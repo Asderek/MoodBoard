@@ -1,43 +1,49 @@
 {
-	"name": "Click Me",
-	"color": "#4B0082",
-	"description": "Welcome to Mood Board.\n\ncontrols:\n- Left Click: Enter Node\n- Right Click: Go Back\n- Middle Mouse Drag: Pan Camera\n\nThis is the default view. If you had a save file, it was loaded instead.",
+	"name": "Tutorial",
+	"color": "#202020",
 	"children": [
 		{
-			"name": "Idea 1",
-			"color": "#FF5733",
-			"description": "This is a sample idea.",
-			"children": []
-		},
-		{
-			"name": "Idea 2",
-			"color": "#33FF57",
-			"description": "Another cool thought.",
-			"children": []
-		},
-		{
-			"name": "Idea 3",
-			"color": "#3357FF",
-			"description": "Something blue.",
-			"children": []
-		},
-		{
-			"name": "Idea 4",
-			"color": "#F0F033",
-			"description": "Yellow note.",
-			"children": []
-		},
-		{
-			"name": "Idea 5",
-			"color": "#FF33F0",
-			"description": "Pink flamingo.",
-			"children": []
-		},
-		{
-			"name": "Idea 6",
-			"color": "#33FFF0",
-			"description": "Cyan sky.",
-			"children": []
+			"name": "Click Me",
+			"color": "#4B0082",
+			"description": "Welcome to Mood Board.\n\ncontrols:\n- Left Click: Enter Node\n- Right Click: Go Back\n- Middle Mouse Drag: Pan Camera\n\nThis is the default view. If you had a save file, it was loaded instead.",
+			"children": [
+				{
+					"name": "Introduction",
+					"color": "#FF5733",
+					"description": "This is a sample idea.",
+					"children": []
+				},
+				{
+					"name": "Controls",
+					"color": "#33FF57",
+					"description": "Another cool thought.",
+					"children": []
+				},
+				{
+					"name": "Navigation",
+					"color": "#3357FF",
+					"description": "Something blue.",
+					"children": []
+				},
+				{
+					"name": "Structuring",
+					"color": "#F0F033",
+					"description": "Yellow note.",
+					"children": []
+				},
+				{
+					"name": "Saving",
+					"color": "#FF33F0",
+					"description": "Pink flamingo.",
+					"children": []
+				},
+				{
+					"name": "Enjoy!",
+					"color": "#33FFF0",
+					"description": "Cyan sky.",
+					"children": []
+				}
+			]
 		}
 	]
 }

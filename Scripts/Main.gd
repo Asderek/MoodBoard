@@ -81,7 +81,8 @@ func load_data():
 	# 3. New File (or missing)
 	if Global.current_file_path != "":
 		print("Creating New Board: ", Global.current_file_path)
-		mood_data = {"name": "New Board", "color": Color.hex(0x4B0082FF).to_html(), "children": []}
+		var board_name = Global.current_file_path.get_file().get_basename()
+		mood_data = {"name": board_name, "color": Color.hex(0x4B0082FF).to_html(), "children": []}
 		save_data() # Create the file
 		return
 		
@@ -103,7 +104,32 @@ func _unhandled_input(event):
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			_go_up_layer()
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			# If we clicked empty space (since this is unhandled), close sidebar
+			if event.double_click:
+				# Double Click on "Nothing" -> Create New Node
+				# Check distance to existing nodes to ensure we are in "empty space"
+				var mouse_pos = get_viewport().get_mouse_position()
+				var plane = Plane(Vector3.BACK, 0)
+				var from = camera.project_ray_origin(mouse_pos)
+				var dir = camera.project_ray_normal(mouse_pos)
+				
+				var world_pos = plane.intersects_ray(from, dir)
+				
+				if world_pos:
+					var is_safe_space = true
+					# Node Width is 2.0. Threshold = Width * 1.5 = 3.0
+					var safe_distance = 3.0 
+					
+					for child in node_root.get_children():
+						# Check against visible nodes (exclude fading ones if any?)
+						# Just check all direct children which are nodes
+						if child.position.distance_to(world_pos) < safe_distance:
+							is_safe_space = false
+							break
+					
+					if is_safe_space:
+						add_new_node()
+			
+			# Always close sidebar on any background click (single or double)
 			if ui_layer:
 				ui_layer.close_sidebar()
 
@@ -138,26 +164,56 @@ func _process(_delta):
 
 func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimType = AnimType.DEFAULT, focus_pos: Vector3 = Vector3.ZERO):
 	current_view_data = parent_data
-	var children_data = parent_data.get("children", [])
 	
-	# Transition Animation: Clean up OLD nodes
-	# For simplicity, let's just queue_free everything in node_root that is a MoodNode
-	# Or if we want animation, we can tunnel them out.
+	# --- 0. PREPARE EXIT (Cleanup Old Layer) ---
+	# We must do this BEFORE adding any new children to node_root
 	
 	# 1. Create Exit Snapshot (Tunnel Effect)
 	var exit_root = Node3D.new()
 	add_child(exit_root)
 	
 	# Move current children to exit_root
-	# Note: This reparents them, so they are removed from node_root
 	var old_nodes = node_root.get_children()
 	for child in old_nodes:
 		child.reparent(exit_root)
-		# Fade out logic if desired
-		if child.has_method("fade_label"):
-			child.fade_label(0.0, 0.2)
 
-	# 2. Spawn NEW nodes
+	# --- 1. NEW BREADCRUMB HEADER ---
+	# Row above the grid (Y = 5.0)
+	var header_y = 5.0
+	var header_spacing = 3.0
+	var stack = current_path_stack + [current_view_data] # All parents including current
+	
+	# Calculate total width to center them
+	var stack_size = stack.size()
+	var start_x = -(stack_size - 1) * header_spacing * 0.5
+	
+	for i in range(stack_size):
+		var data = stack[i]
+		
+		var node = MoodNodeScene.instantiate()
+		node_root.add_child(node)
+		node.setup(data)
+		
+		# Position in Header Row
+		var h_x = start_x + (i * header_spacing)
+		node.position = Vector3(h_x, header_y, 0)
+		node.add_to_group("header_node") 
+		
+		# Animation Logic
+		if anim_type == AnimType.TUNNEL_IN and i == stack_size - 1:
+			# NEW Item (Just clicked): "Slide Up" transition
+			# Start invisible, wait for old node to arrive.
+			node.scale = Vector3.ZERO
+			var t = create_tween()
+			t.tween_property(node, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(0.6)
+		else:
+			# ANCESTOR (Already there) or DEFAULT (Refresh): Spawn visible immediately
+
+			node.scale = Vector3.ONE
+
+	# --- 2. NEW GRID CONTENT (Children) ---
+	var children_data = parent_data.get("children", [])
+	
 	var idx = 0
 	for data in children_data:
 		var n = MoodNodeScene.instantiate()
@@ -173,8 +229,8 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		var row = idx / GRID_COLS
 		
 		# Centering offset (optional)
-		var start_x = -(GRID_COLS * GRID_SPACING_X) / 2.0 + GRID_SPACING_X / 2.0
-		var x_pos = start_x + (col * GRID_SPACING_X)
+		var start_x2 = -(GRID_COLS * GRID_SPACING_X) / 2.0 + GRID_SPACING_X / 2.0
+		var x_pos = start_x2 + (col * GRID_SPACING_X)
 		var y_pos = -(row * GRID_SPACING_Y) # Grow downwards
 		
 		n.position = Vector3(x_pos, y_pos, 0)
@@ -213,18 +269,99 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		
 	# Animate Exit Root
 	var exit_tween = create_tween().set_parallel(true)
+	
 	if anim_type == AnimType.TUNNEL_IN:
-		# Zoom Exit Root big and fade
-		exit_tween.tween_property(exit_root, "position:z", 20.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
-		exit_tween.tween_property(exit_root, "scale", Vector3.ONE * 3.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
-		exit_tween.tween_property(exit_root, "modulate:a", 0.0, 0.5)
+		# "Column Split": User enters a node.
+		# 1. Left cols fly Left. Right cols fly Right. Same col flies Random.
+		# 2. Clicked node slides UP to Header.
+		
+		# Calculate where the new header item will be?
+		# It's the last item in the NEW stack (which is stack + current).
+		# We can re-calculate the position logic used in _spawn_layer breadcrumbs.
+		var stack_count = current_path_stack.size() + 1
+		var anim_header_spacing = 3.0
+		var anim_start_x = -(stack_count - 1) * anim_header_spacing * 0.5
+		var target_header_x = anim_start_x + ((stack_count - 1) * anim_header_spacing)
+		var target_header_pos = Vector3(target_header_x, 5.0, 0.0) # Local to NodeRoot, but exit_root is at 0,0,0
+		
+		for child in exit_root.get_children():
+			# HEADER PROTECTION:
+			if child.is_in_group("header_node") or child.position.y > 2.0:
+				# This is an old header node.
+				child.queue_free()
+				continue
+				
+			var diff_x = child.position.x - focus_pos.x
+			var is_clicked = child.position.distance_to(focus_pos) < 0.1
+			
+			if is_clicked:
+				# SLIDE UP to Header
+				# Note: exit_root is fading? No, we shouldn't fade exit_root if we want this visible.
+				# We will fade individual children instead.
+				var t = create_tween()
+				t.tween_property(child, "position", target_header_pos, 0.6).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+				t.tween_property(child, "scale", Vector3.ONE, 0.6) # Maintain scale?
+				# Don't fade this one!
+				
+			elif abs(diff_x) > 0.1: # Different Column
+				var dir = Vector3.RIGHT if diff_x > 0 else Vector3.LEFT
+				var target = child.position + (dir * 30.0)
+				
+				var t = create_tween().set_parallel(true)
+				t.tween_property(child, "position", target, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+				if child.has_method("fade_label"):
+					child.fade_label(0.0, 0.3)
+				
+			else: # Same Column (but not clicked)
+				# Fly Randomly Left or Right
+				var rand_side = Vector3.LEFT if randf() < 0.5 else Vector3.RIGHT
+				var target = child.position + (rand_side * 30.0) # Fly further?
+				
+				var t = create_tween().set_parallel(true)
+				t.tween_property(child, "position", target, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+				if child.has_method("fade_label"):
+					child.fade_label(0.0, 0.3)
+				
+		# Keep alive long enough for slide to finish (0.6s) + buffer
+		exit_tween.tween_interval(0.8)
 	elif anim_type == AnimType.TUNNEL_OUT:
-		# Shrink away
-		exit_tween.tween_property(exit_root, "position:z", -50.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
-		exit_tween.tween_property(exit_root, "scale", Vector3.ZERO, 0.5)
+		# "Clear Out": Parting from the middle (Moses Effect)
+		# Nodes fly off to the sides to reveal the layer behind.
+		for child in exit_root.get_children():
+			# HEADER PROTECTION (Essential for Go Back too)
+			if child.is_in_group("header_node") or child.position.y > 2.0:
+				child.queue_free() # Don't fling header nodes
+				continue
+
+			var dir = Vector3.RIGHT if child.position.x >= 0 else Vector3.LEFT
+			# If perfectly center (x=0), maybe alternate or go Up? Default Right.
+			
+			var target_pos = child.position + (dir * 35.0) # Fly way off screen
+			
+			child.scale = Vector3.ONE # Ensure scale is normal before flying
+			
+			var tween = create_tween()
+			tween.set_parallel(true)
+			tween.tween_property(child, "position", target_pos, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+			# Add rotation for style?
+			tween.tween_property(child, "rotation:z", deg_to_rad(dir.x * 45.0), 0.6)
+			
+			if child.has_method("fade_label"):
+				child.fade_label(0.0, 0.2)
+		
+		# Keep exit_root alive until children are gone
+		exit_tween.tween_interval(0.7)
 	else:
-		# Just fade out
-		exit_tween.tween_property(exit_root, "modulate:a", 0.0, 0.3)
+		# Just scale out children since modulate:a doesn't work on Node3D
+		for child in exit_root.get_children():
+			# HEADER PROTECTION: Don't animate old header (it overlaps with new one)
+			if child.is_in_group("header_node"):
+				child.queue_free()
+				continue
+				
+			var t = create_tween()
+			t.tween_property(child, "scale", Vector3.ZERO, 0.3)
+		exit_tween.tween_interval(0.3)
 	
 	exit_tween.chain().tween_callback(exit_root.queue_free)
 
@@ -253,7 +390,7 @@ func _enter_node(node):
 	current_path_stack.append(current_view_data) 
 	
 	# Pass the *current* local position of the node as the focus point
-	_spawn_layer(data, Vector3.ZERO, AnimType.TUNNEL_IN)
+	_spawn_layer(data, Vector3.ZERO, AnimType.TUNNEL_IN, node.position)
 func return_to_menu():
 	save_data()
 	get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
