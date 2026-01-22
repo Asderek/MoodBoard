@@ -47,6 +47,9 @@ func _ready():
 	ui_scene.connect("view_mode_changed", _on_view_mode_changed)
 	ui_scene.connect("align_grid_requested", _on_align_grid_requested)
 	
+	# Drag & Drop Handler
+	get_tree().get_root().files_dropped.connect(_on_files_dropped)
+	
 	# Setup Timeline Visuals
 	timeline_lines_mesh = MeshInstance3D.new()
 	timeline_lines_mesh.mesh = ImmediateMesh.new()
@@ -130,7 +133,55 @@ func _parse_json_file(file: FileAccess) -> Error:
 		print("JSON Parse Error: ", json.get_error_message())
 	return error
 
+func _on_files_dropped(files: PackedStringArray):
+	# Calculate Drop Position (Mouse Raycast)
+	var mouse_pos = get_viewport().get_mouse_position()
+	var plane = Plane(Vector3.BACK, 0)
+	var from = camera.project_ray_origin(mouse_pos)
+	var dir = camera.project_ray_normal(mouse_pos)
+	var world_pos = plane.intersects_ray(from, dir)
+	
+	if not world_pos: return
+	
+	# If we have multiple files, scatter them slightly?
+	var offset = Vector3.ZERO
+	
+	for file_path in files:
+		add_new_node_from_file(file_path, world_pos + offset)
+		offset.x += 2.2 # Stack right
+
+func add_new_node_from_file(path: String, pos: Vector3):
+	if not current_view_data.has("children"): return
+
+	var new_node_data = {
+		"name": path.get_file(), # Use filename as label
+		"color": Color.from_hsv(randf(), 0.7, 0.9).to_html(),
+		"children": [],
+		"created_at": Time.get_unix_time_from_system(),
+		"timeline_id": 0,
+		"timeline_index": 9999,
+		"pos_y": pos.y,
+		"pos_x": pos.x,
+		"file_path": path, # Store absolute path
+		"use_bg_color": false # Default to no background for images
+	}
+	
+	if current_layout_mode == LayoutMode.TIMELINE:
+		# Map Y to lane
+		var lane = round(-pos.y / TIMELINE_LANE_HEIGHT)
+		new_node_data["timeline_id"] = int(lane)
+	
+	current_view_data["children"].append(new_node_data)
+	_spawn_layer(current_view_data, Vector3.ZERO) 
+	save_data()
+
 func _unhandled_input(event):
+	if event is InputEventKey:
+		if event.pressed and event.keycode == KEY_V:
+			if event.ctrl_pressed or event.command_or_control_autoremap:
+				_handle_paste()
+				get_viewport().set_input_as_handled()
+				
 	if event is InputEventMouseButton:
 		if event.pressed:
 			# PRESS EVENTS
@@ -162,18 +213,43 @@ func _unhandled_input(event):
 						if is_safe_space:
 							add_new_node()
 		
-		elif event.button_index == MOUSE_BUTTON_LEFT:
-			# RELEASE EVENTS
-			# Always close sidebar on any background click (single or double)
-			# Since MoodNode handles its own release event and consumes it,
-			# if we are here, it means we clicked on the background.
-			if ui_layer:
-				ui_layer.close_sidebar()
+			elif event.button_index == MOUSE_BUTTON_LEFT:
+				# RELEASE EVENTS
+				if ui_layer:
+					ui_layer.close_sidebar()
+				
+				if Time.get_ticks_msec() - last_selection_time > 150:
+					clear_selection()
+
+func _handle_paste():
+	if DisplayServer.clipboard_has_image():
+		var img = DisplayServer.clipboard_get_image()
+		if img:
+			# Ensure directory exists
+			var dir_path = "user://pasted_images"
+			if not DirAccess.dir_exists_absolute(dir_path):
+				DirAccess.make_dir_absolute(dir_path)
 			
-			# Guard: If we just selected a node (within 150ms), don't clear selection.
-			# This handles the case where the release event propagates despite being handled.
-			if Time.get_ticks_msec() - last_selection_time > 150:
-				clear_selection()
+			# Generate Filename
+			var timestamp = Time.get_ticks_msec()
+			var file_path = dir_path + "/paste_%d.png" % timestamp
+			
+			var err = img.save_png(file_path)
+			if err == OK:
+				# Calculate paste position (at mouse cursor or screen center)
+				# Preferred: Mouse Cursor
+				var mouse_pos = get_viewport().get_mouse_position()
+				var plane = Plane(Vector3.BACK, 0)
+				var from = camera.project_ray_origin(mouse_pos)
+				var dir = camera.project_ray_normal(mouse_pos)
+				var world_pos = plane.intersects_ray(from, dir)
+				
+				if not world_pos: 
+					world_pos = Vector3(0, 0, 0) # Fallback
+				
+				add_new_node_from_file(file_path, world_pos)
+			else:
+				print("Failed to save clipboard image: ", err)
 
 
 func _go_up_layer():
@@ -332,27 +408,31 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		n.position = target_pos
 		
 		# Entry Animation (Same logic as before)
+		# Entry Animation (Same logic as before)
+		var s_val = float(data.get("scale", 1.0))
+		var target_scale = Vector3(s_val, s_val, s_val)
+		
 		if anim_type == AnimType.TUNNEL_IN:
 			n.scale = Vector3.ZERO
 			n.position.z = -50.0
 			var tween = create_tween()
 			tween.set_parallel(true)
-			tween.tween_property(n, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tween.tween_property(n, "scale", target_scale, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			tween.tween_property(n, "position:z", 0.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		elif anim_type == AnimType.TUNNEL_OUT:
-			n.scale = Vector3.ONE * 3.0
+			n.scale = target_scale * 3.0
 			n.position.z = 20.0 
 			if n.has_method("set_label_opacity"):
 				n.set_label_opacity(0.0)
 				n.fade_label(1.0, 0.5)
 			var tween = create_tween()
 			tween.set_parallel(true)
-			tween.tween_property(n, "scale", Vector3.ONE, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			tween.tween_property(n, "scale", target_scale, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 			tween.tween_property(n, "position:z", 0.0, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		else:
 			n.scale = Vector3.ZERO
 			var tween = create_tween()
-			tween.tween_property(n, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(randf() * 0.2)
+			tween.tween_property(n, "scale", target_scale, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(randf() * 0.2)
 
 
 
@@ -607,6 +687,13 @@ func _on_node_entered(node):
 
 func _enter_node(node):
 	var data = node.node_data
+	
+	# Check if this node is a FILE (Image/PDF)
+	if data.has("file_path") and data["file_path"] != "":
+		# OPEN FILE externally
+		OS.shell_open(data["file_path"])
+		return
+
 	current_path_stack.append(current_view_data) 
 	
 	# Pass the *current* local position of the node as the focus point
