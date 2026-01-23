@@ -42,15 +42,19 @@ var pan_base_sensitivity = 0.002
 var zoom_sensitivity = 0.1
 var min_zoom = 2.0
 var max_zoom = 50.0
+var can_zoom : bool = true
+
 
 func _unhandled_input(event):
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			is_dragging = event.pressed
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_handle_zoom(event.position, -1) # Zoom In
+			if can_zoom:
+				_handle_zoom(event.position, -1) # Zoom In
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_handle_zoom(event.position, 1)  # Zoom Out
+			if can_zoom:
+				_handle_zoom(event.position, 1)  # Zoom Out
 	
 	if event is InputEventMouseMotion and is_dragging:
 		# Panning: Move Camera Opposite to Drag

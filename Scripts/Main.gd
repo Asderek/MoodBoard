@@ -24,11 +24,14 @@ const GRID_SPACING_Y = 2.5
 
 
 var ui_layer = null
+var current_dragging_node = null
+var hovered_reparent_node = null
+
 enum LayoutMode { FREE, TIMELINE }
 var current_layout_mode = LayoutMode.FREE
 
 const TIMELINE_LANE_HEIGHT = 4.0
-const TIMELINE_ITEM_WIDTH = 3.0
+var timeline_item_width = 3.0 # Changed to var for slider control
 
 var timeline_lines_mesh: MeshInstance3D = null
 
@@ -45,7 +48,9 @@ func _ready():
 	
 	# View Mode Connections
 	ui_scene.connect("view_mode_changed", _on_view_mode_changed)
+	ui_scene.connect("view_mode_changed", _on_view_mode_changed)
 	ui_scene.connect("align_grid_requested", _on_align_grid_requested)
+	ui_scene.connect("spacing_changed", _on_spacing_changed)
 	
 	# Drag & Drop Handler
 	get_tree().get_root().files_dropped.connect(_on_files_dropped)
@@ -212,14 +217,14 @@ func _unhandled_input(event):
 						
 						if is_safe_space:
 							add_new_node()
-		
-			elif event.button_index == MOUSE_BUTTON_LEFT:
-				# RELEASE EVENTS
-				if ui_layer:
-					ui_layer.close_sidebar()
-				
-				if Time.get_ticks_msec() - last_selection_time > 150:
-					clear_selection()
+							
+				else:
+					# Single Click on "Nothing"
+					if ui_layer:
+						ui_layer.close_sidebar()
+					
+					if Time.get_ticks_msec() - last_selection_time > 150:
+						clear_selection()
 
 func _handle_paste():
 	if DisplayServer.clipboard_has_image():
@@ -255,6 +260,10 @@ func _handle_paste():
 func _go_up_layer():
 	if current_path_stack.is_empty():
 		return
+		
+	# QoL: Close Sidebar on Transition
+	if ui_layer:
+		ui_layer.close_sidebar()
 		
 	var parent_data = current_path_stack.pop_back()
 	
@@ -318,7 +327,47 @@ enum AnimType { DEFAULT, TUNNEL_IN, TUNNEL_OUT }
 var current_view_data: Dictionary = {}
 
 func _process(_delta):
-	pass # No continuous updates needed for grid
+	# QoL: Disable Zoom if Sidebar is Open
+	if ui_layer and camera:
+		camera.can_zoom = not ui_layer.is_sidebar_open()
+
+	# Continuous Drag Check
+	if current_dragging_node and is_instance_valid(current_dragging_node):
+		_update_drag_hover()
+
+func _update_drag_hover():
+	var dragging_pos = current_dragging_node.position
+	var found_node = null
+	var threshold = 1.5 # Trigger "lid open" at this distance
+	
+	# Check interactions with other nodes
+	for other in node_root.get_children():
+		if other == current_dragging_node: continue
+		if other.is_in_group("header_node"): continue # Headers handled separately if needed, or same logic
+		if not is_instance_valid(other): continue
+		if other.is_queued_for_deletion(): continue
+		if other.has_method("is_marked_for_deletion") and other.is_marked_for_deletion(): continue
+		
+		var dist = dragging_pos.distance_to(other.position)
+		if dist < threshold:
+			found_node = other
+			break
+	
+	# Update State
+	if found_node != hovered_reparent_node:
+		# Exit Old
+		if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+			if hovered_reparent_node.has_method("hide_reparent_feedback"):
+				hovered_reparent_node.hide_reparent_feedback()
+		
+		# Enter New
+		hovered_reparent_node = found_node
+		if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+			if hovered_reparent_node.has_method("show_reparent_feedback"):
+				hovered_reparent_node.show_reparent_feedback()
+	
+	# If nothing found, hovered_reparent_node becomes null (after hiding old)
+
 
 func clear_selection():
 	if not selected_nodes.is_empty():
@@ -626,6 +675,8 @@ func _on_node_drag_started(node):
 		
 	if ui_layer:
 		ui_layer.set_bin_visible(true)
+		
+	current_dragging_node = node # Start tracking
 
 func _on_node_drag_ended(node):
 	# Check 2D Bin intersection via UI layer
@@ -671,6 +722,11 @@ func _on_node_drag_ended(node):
 	if ui_layer:
 		ui_layer.set_bin_visible(false)
 		
+	# Check for Reparenting FIRST (Priority over placement)
+	if node and is_instance_valid(node):
+		if _check_reparent_drop(node):
+			return # Handled by reparenting
+
 	# Save Position Update (if free mode)
 	if node:
 		if current_layout_mode == LayoutMode.FREE:
@@ -679,6 +735,115 @@ func _on_node_drag_ended(node):
 			save_data()
 		elif current_layout_mode == LayoutMode.TIMELINE:
 			_handle_timeline_drop(node)
+
+func _check_reparent_drop(dropped_node) -> bool:
+	var drop_pos = dropped_node.global_position # Use global for safety against local offsets
+	
+	# 1. Check VISUAL TARGET (Sibling Reparent)
+	if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+		# If we are hovering a node (lid is open), any drop nearby should trigger reparenting.
+		# The visual feedback (lid open) implies "Ready to accept".
+		# Let's check distance to the node itself, or just trust the hover state if close enough.
+		
+		var dist = drop_pos.distance_to(hovered_reparent_node.global_position)
+		var accept_threshold = 2.0 # More permissive threshold (Node is size 2.0 approx)
+		
+		if dist < accept_threshold:
+			_execute_reparent_to_sibling(dropped_node, hovered_reparent_node)
+			
+			# Reset Visuals immediately
+			hovered_reparent_node.hide_reparent_feedback()
+			hovered_reparent_node = null
+			current_dragging_node = null
+			return true
+
+	# 2. Check ANCESTORS (Header Nodes) - Standard proximity logic
+	var header_nodes = get_tree().get_nodes_in_group("header_node")
+	for header in header_nodes:
+		var dist = dropped_node.position.distance_to(header.position)
+		if dist < 2.0:
+			_execute_reparent_to_ancestor(dropped_node, header)
+			current_dragging_node = null
+			return true
+			
+	# If no action taken, clear drag state
+	if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+		hovered_reparent_node.hide_reparent_feedback()
+	
+	hovered_reparent_node = null
+	current_dragging_node = null
+	return false
+
+func _execute_reparent_to_sibling(node, target_node):
+	print("Reparenting ", node.name, " into ", target_node.name)
+	
+	# 1. Remove from Current Data
+	current_view_data["children"].erase(node.node_data)
+	
+	# 2. Add to Target Data
+	if not target_node.node_data.has("children"):
+		target_node.node_data["children"] = []
+	
+	# Reset position for the new layer (center it for now?)
+	# Or keep relative position? Relative is hard since we don't know the new layout.
+	# Resetting to 0,0 is safe.
+	node.node_data["pos_x"] = 0.0
+	node.node_data["pos_y"] = 0.0
+	node.node_data["timeline_id"] = 0
+	
+	target_node.node_data["children"].append(node.node_data)
+	
+	# 3. Visual Feedback
+	# Shrink node into target
+	var t = create_tween()
+	t.tween_property(node, "scale", Vector3.ZERO, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	t.tween_property(node, "position", target_node.position, 0.3)
+	
+	await t.finished
+	
+	# 4. Refresh & Save
+	if is_instance_valid(node):
+		node.queue_free()
+	_spawn_layer(current_view_data, Vector3.ZERO) # Refresh current view (node is gone)
+	save_data()
+
+func _execute_reparent_to_ancestor(node, target_header):
+	var target_data = target_header.node_data
+	
+	# Prevent moving to SELF (shouldn't happen as we are inside self's child layer)
+	# Prevent moving to Current Layer (Header includes current layer usually? No, stack + current)
+	# Actually stack + current is what we render. 
+	# If target_data == current_view_data, we are dropping on "Current Folder" header.
+	# Doing nothing is fine, or maybe "Move to Top" of list?
+	if target_data == current_view_data:
+		return
+		
+	print("Moving ", node.name, " up to ", target_data.get("name", "Ancestor"))
+	
+	# 1. Remove from Current
+	current_view_data["children"].erase(node.node_data)
+	
+	# 2. Add to Ancestor
+	if not target_data.has("children"):
+		target_data["children"] = []
+		
+	# Reset Pos
+	node.node_data["pos_x"] = 0.0
+	node.node_data["pos_y"] = 0.0
+	
+	target_data["children"].append(node.node_data)
+	
+	# 3. Visuals
+	var t = create_tween()
+	t.tween_property(node, "scale", Vector3.ZERO, 0.3)
+	t.tween_property(node, "position", target_header.position, 0.3)
+	
+	await t.finished
+	
+	# 4. Refresh
+	node.queue_free()
+	_spawn_layer(current_view_data, Vector3.ZERO)
+	save_data()
 
 
 
@@ -693,6 +858,10 @@ func _enter_node(node):
 		# OPEN FILE externally
 		OS.shell_open(data["file_path"])
 		return
+
+	# QoL: Close Sidebar on Transition
+	if ui_layer:
+		ui_layer.close_sidebar()
 
 	current_path_stack.append(current_view_data) 
 	
@@ -776,7 +945,17 @@ func _normalize_timeline_ids():
 		if id_map.has(old_id):
 			child["timeline_id"] = id_map[old_id]
 
+func _on_spacing_changed(value):
+	# Slider value 0.0 to 1.0? Or raw multiplier?
+	# Let's say slider gives 0.5 to 3.0 multiplier on base 2.5 width
+	# Or user provides direct width 2.5 to 10.0
+	timeline_item_width = value
+	
+	# Refresh layout only
+	_spawn_layer(current_view_data, Vector3.ZERO)
+
 func _calculate_timeline_layout(nodes_data: Array) -> Array:
+	_cached_timeline_lines.clear() # Fix: Clear old cache
 	var positions = []
 	var count = nodes_data.size()
 	positions.resize(count)
@@ -811,55 +990,22 @@ func _calculate_timeline_layout(nodes_data: Array) -> Array:
 	
 	# --- LAYOUT LOGIC ---
 	
-	# A. Determine Max Width of "Main" Timelines (Everything except the last one)
-	# The Aux timeline (last one) should be roughly the size of the longest main timeline.
-	
-	var max_main_width = 0
+	var current_y_cursor = 0.0
 	
 	var all_lanes = lane_nodes.keys()
 	all_lanes.sort()
-	
-	# Check all lanes EXCEPT the last one (if there is more than 1)
-	if all_lanes.size() > 1:
-		for lane in all_lanes:
-			if lane != max_timeline_id:
-				var w = lane_nodes[lane].size()
-				if w > max_main_width:
-					max_main_width = w
-	else:
-		# If only one timeline exists, treat it as Main? Or Aux?
-		# If only 1, it's just a board. Let's default to a reasonable width or just Main width.
-		# If max_main_width stays 0, subsequent logic handles min.
-		if not all_lanes.is_empty() and lane_nodes.has(all_lanes[0]):
-			max_main_width = lane_nodes[all_lanes[0]].size()
-	
-	# Ensure a minimum width so it doesn't wrap aggressively
-	# "Slightly bigger" -> Let's add padding + satisfy min 3.
-	var constraint_width = max(3, max_main_width)
-	
-	# Clear Cache for Visuals
-	_cached_timeline_lines.clear()
-	
-	# Track Y offsets dynamically because wrapping increases height
-	var current_y_cursor = 0.0
 	
 	# We must iterate lanes in order 0..max_id to stack them correcty
 	for lane in all_lanes:
 		var items = lane_nodes[lane]
 		var row_count = items.size()
 		
-		# --- Wrapping Logic for AUX TIMELINE (Last one) ---
-		var is_aux = (lane == max_timeline_id) and (max_timeline_id > 0)
-		
-		# If it's the aux timeline, we use wrapping
-		var items_per_row = row_count # Default: No wrap
-		
-		if is_aux:
-			items_per_row = constraint_width
+		# Allow infinite width for all timelines
+		var items_per_row = row_count 
+		if items_per_row == 0: items_per_row = 1 # Safety
 			
-		# Calculate rows needed for this lane
-		var lane_rows = ceil(float(row_count) / float(items_per_row))
-		if lane_rows < 1: lane_rows = 1
+		# Calculate rows needed for this lane (Should be 1 now always)
+		var lane_rows = 1
 		
 		# Draw items
 		for i in range(row_count):
@@ -880,10 +1026,10 @@ func _calculate_timeline_layout(nodes_data: Array) -> Array:
 				var rem = row_count % items_per_row
 				if rem > 0: items_in_this_row = rem
 			
-			var row_w = items_in_this_row * TIMELINE_ITEM_WIDTH
-			var start_x = -(row_w / 2.0) + (TIMELINE_ITEM_WIDTH / 2.0)
+			var row_w = items_in_this_row * timeline_item_width
+			var start_x = -(row_w / 2.0) + (timeline_item_width / 2.0)
 			
-			var x = start_x + (col * TIMELINE_ITEM_WIDTH)
+			var x = start_x + (col * timeline_item_width)
 			var y = current_y_cursor - (row_offset * TIMELINE_LANE_HEIGHT)
 			
 			positions[item.index] = Vector3(x, y, 0)
@@ -891,8 +1037,8 @@ func _calculate_timeline_layout(nodes_data: Array) -> Array:
 			# CACHE VISUAL LINE (Only once per row)
 			if col == 0:
 				# It's the start of a row. Calculate layout for this row.
-				var line_start_x = start_x - (TIMELINE_ITEM_WIDTH * 0.5) - 2.0
-				var line_end_x = start_x + ((items_in_this_row - 1) * TIMELINE_ITEM_WIDTH) + (TIMELINE_ITEM_WIDTH * 0.5) + 2.0
+				var line_start_x = start_x - (timeline_item_width * 0.5) - 2.0
+				var line_end_x = start_x + ((items_in_this_row - 1) * timeline_item_width) + (timeline_item_width * 0.5) + 2.0
 				
 				_cached_timeline_lines.append({
 					"start": Vector3(line_start_x, y, -0.1),

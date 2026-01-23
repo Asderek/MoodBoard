@@ -7,6 +7,7 @@ signal exit_requested
 # New Signals
 signal delete_mode_toggled(active)
 signal delete_confirmed
+signal spacing_changed(value)
 # View Signals
 signal view_mode_changed(mode_name)
 signal align_grid_requested
@@ -33,6 +34,9 @@ func _ready():
 	add_button.pressed.connect(_on_add_button_pressed)
 	$ForegroundLayer/Sidebar/VBoxContainer/SaveButton.pressed.connect(_on_save_pressed)
 	
+	if recycling_bin:
+		recycling_bin.visible = false
+	
 	_setup_bg_toggle() # Add CheckBox dynamically
 	_setup_sidebar_toggle()
 	_setup_exit_button()
@@ -42,9 +46,18 @@ func _ready():
 	delete_mode_btn.pressed.connect(_on_delete_mode_pressed)
 	delete_cancel_btn.pressed.connect(_on_delete_cancel_pressed)
 	
+	# Fix: Connect View Controls (Free, Timeline, Align)
+	free_btn.pressed.connect(func(): _set_view_mode("FREE"))
+	timeline_btn.pressed.connect(func(): _set_view_mode("TIMELINE"))
+	align_btn.pressed.connect(func(): emit_signal("align_grid_requested"))
+	
+	_setup_spacing_slider()
+	
 	color_picker.color_changed.connect(_on_color_changed)
 
 var show_bg_checkbox: CheckBox = null
+var spacing_slider: HSlider = null
+var sidebar_toggle_btn: Button = null
 
 func _setup_bg_toggle():
 	show_bg_checkbox = CheckBox.new()
@@ -65,14 +78,40 @@ func _on_bg_toggled(pressed: bool):
 			current_node_ref.set_show_background(pressed)
 
 func show_sidebar(node_data: Dictionary, node_ref):
+	var was_visible = sidebar.visible
 	current_node_data = node_data
 	current_node_ref = node_ref
 	
 	sidebar.visible = true
+	if sidebar_toggle_btn:
+		sidebar_toggle_btn.visible = true
 	
-	# Auto-open if collapsed
+	# Auto-open if collapsed (logical state)
 	if is_sidebar_collapsed:
-		_on_toggle_sidebar()
+		_on_toggle_sidebar() # This handles its own animation
+	elif not was_visible:
+		# Initial Open Animation (Slide In)
+		# Start Off-Screen (Collapsed Position)
+		sidebar.offset_left = 0
+		sidebar.offset_right = 300
+		
+		if sidebar_toggle_btn:
+			sidebar_toggle_btn.offset_left = -160 + 300 # 140
+			sidebar_toggle_btn.offset_right = -120 + 300 # 180
+			
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		
+		# Move to On-Screen (Open Position)
+		tween.tween_property(sidebar, "offset_left", -300, 0.3)
+		tween.tween_property(sidebar, "offset_right", 0, 0.3)
+		
+		if sidebar_toggle_btn:
+			tween.tween_property(sidebar_toggle_btn, "offset_left", -160, 0.3)
+			tween.tween_property(sidebar_toggle_btn, "offset_right", -120, 0.3)
+			
+	# Else: It is already open and visible, no need to touch position.
 		
 	name_edit.text = str(node_data.get("name", ""))
 	desc_edit.text = str(node_data.get("description", ""))
@@ -88,8 +127,10 @@ func _setup_sidebar_toggle():
 	var btn = Button.new()
 	btn.text = "≡" # Sandwich Icon
 	btn.name = "SidebarToggle"
+	sidebar_toggle_btn = btn
 	
 	$ForegroundLayer.add_child(btn)
+	btn.visible = false # Hidden by default
 	
 	btn.anchors_preset = Control.PRESET_BOTTOM_RIGHT
 	btn.anchor_top = 1.0
@@ -142,8 +183,7 @@ func _on_toggle_sidebar():
 	tween.set_parallel(true)
 	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	
-	var toggle_btn = $ForegroundLayer.get_node_or_null("SidebarToggle")
-	var ctrls = [toggle_btn]
+	var ctrls = [sidebar_toggle_btn]
 	
 	if is_sidebar_collapsed:
 		tween.tween_property(sidebar, "offset_left", 0, 0.3)
@@ -168,7 +208,43 @@ func _on_toggle_sidebar():
 
 
 func close_sidebar():
-	sidebar.visible = false
+	# If already hidden, do nothing
+	if not sidebar.visible:
+		return
+		
+	# If it's fully open (not collapsed), we want to animate it to "collapsed" (off-screen) state first
+	if not is_sidebar_collapsed:
+		# We can re-use the toggle logic closely, or just write a specific close tween
+		# Let's write a specific one to ensure it ends with visible = false
+		
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+		
+		# Move Sidebar Right (Off-screen) -> offset 0 to 300
+		tween.tween_property(sidebar, "offset_left", 0, 0.3)
+		tween.tween_property(sidebar, "offset_right", 300, 0.3)
+		
+		# Move Toggle Button Right
+		if sidebar_toggle_btn:
+			tween.tween_property(sidebar_toggle_btn, "offset_left", sidebar_toggle_btn.offset_left + 300, 0.3)
+			tween.tween_property(sidebar_toggle_btn, "offset_right", sidebar_toggle_btn.offset_right + 300, 0.3)
+			
+		# After animation, hide everything
+		tween.chain().tween_callback(func():
+			sidebar.visible = false
+			if sidebar_toggle_btn:
+				sidebar_toggle_btn.visible = false
+			is_sidebar_collapsed = false # Reset state
+		)
+		
+	else:
+		# If it was already collapsed (minimized), just hide it
+		sidebar.visible = false
+		if sidebar_toggle_btn:
+			sidebar_toggle_btn.visible = false
+		is_sidebar_collapsed = false
+
 	current_node_ref = null
 
 func _on_color_changed(color: Color):
@@ -205,6 +281,25 @@ func _on_save_pressed():
 func _on_add_button_pressed():
 	emit_signal("add_node_requested")
 
+func _setup_spacing_slider():
+	spacing_slider = HSlider.new()
+	spacing_slider.min_value = 2.0
+	spacing_slider.max_value = 10.0
+	spacing_slider.value = 3.0 # Default
+	spacing_slider.step = 0.5
+	
+	spacing_slider.custom_minimum_size = Vector2(200, 30)
+	
+	# Add to ViewControls (Top Bar)
+	$ForegroundLayer/ViewControls.add_child(spacing_slider)
+	
+	# Hidden by default (Free Mode)
+	spacing_slider.visible = false
+	
+	spacing_slider.value_changed.connect(func(val): emit_signal("spacing_changed", val))
+
+
+
 func _on_delete_mode_pressed():
 	# This button acts as "Enter Mode" OR "Confirm Delete" depending on state
 	emit_signal("delete_mode_toggled", true) 
@@ -234,6 +329,10 @@ func _set_view_mode(mode: String):
 	
 	# Align button only visible in Free Mode
 	align_btn.visible = (mode == "FREE")
+	
+	# Slider only visible in Timeline Mode
+	if spacing_slider:
+		spacing_slider.visible = (mode == "TIMELINE")
 	
 	emit_signal("view_mode_changed", mode)
 
@@ -265,3 +364,6 @@ func _setup_exit_button():
 		emit_signal("exit_requested")
 	)
 	add_child(btn)
+
+func is_sidebar_open() -> bool:
+	return sidebar.visible and not is_sidebar_collapsed

@@ -11,6 +11,16 @@ signal node_drag_ended(node)
 @onready var visual_mesh: MeshInstance3D = $Visual
 @onready var label: Label3D = $Label3D
 
+# Reparenting Visuals
+var lid_root: Node3D = null
+var drop_target_root: Node3D = null
+var is_reparent_open: bool = false
+
+# Badge Visuals
+var badge_root: Node3D = null
+var badge_label: Label3D = null
+
+
 var sprite: Sprite3D = null
 var node_data: Dictionary = {}
 var target_color: Color = Color.WHITE
@@ -62,6 +72,23 @@ func update_visuals():
 	# Show/Hide Background
 	var show_bg = node_data.get("use_bg_color", true) # Default to true
 	visual_mesh.visible = show_bg
+	
+	update_badge()
+
+func update_badge():
+	if not badge_root: return
+	
+	var children = node_data.get("children", [])
+	var count = children.size()
+	
+	if count > 0:
+		badge_root.visible = true
+		badge_label.text = str(count)
+		
+		# Pulse animation if changed?
+		# For now, just static updates.
+	else:
+		badge_root.visible = false
 
 func set_show_background(show: bool):
 	node_data["use_bg_color"] = show
@@ -123,9 +150,16 @@ func _ready():
 	# Ensure label handles multi-line nicely
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.pixel_size = 0.002 
+	label.width = 1.8 / label.pixel_size # Width is in pixels! 1.8m / 0.002 = 900px
+	label.font_size = 144 # Increased by 50% (was 96)
+	label.outline_size = 12
 	
 	_create_selection_visual()
 	_create_resize_handle()
+	_create_reparent_visuals()
+	_create_badge_visuals()
 	
 	mouse_entered.connect(_on_mouse_entered)
 	mouse_exited.connect(_on_mouse_exited)
@@ -329,3 +363,116 @@ func _on_input_event(_camera, event, _position, _normal, _shape_idx):
 func save_scale_to_main():
 	# Trigger save in Main
 	emit_signal("node_drag_ended", self)
+
+# --- REPARENTING VISUALS ---
+
+func _create_reparent_visuals():
+	# 1. Lid Root (Pivot at Top Edge)
+	lid_root = Node3D.new()
+	add_child(lid_root)
+	lid_root.position = Vector3(0, 1.0, 0.15) # Top edge, slightly in front
+	
+	# Lid Mesh (Covers the face)
+	var lid_mesh = MeshInstance3D.new()
+	lid_mesh.mesh = BoxMesh.new()
+	lid_mesh.mesh.size = Vector3(2.0, 2.0, 0.05)
+	
+	# Material (Darker slightly transparent?)
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.2, 0.2, 0.2, 0.8)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	lid_mesh.material_override = mat
+	
+	lid_root.add_child(lid_mesh)
+	lid_mesh.position = Vector3(0, -1.0, 0) # Center relative to pivot is down
+	
+	lid_root.visible = false # Hidden by default
+	
+	# 2. Drop Target (Icon)
+	drop_target_root = Node3D.new()
+	add_child(drop_target_root)
+	drop_target_root.position = Vector3(0, 0, 0.1)
+	drop_target_root.scale = Vector3.ZERO # Hidden initially
+	
+	# Create Arrow Geometry (Cylinder + Cone? Or just a box for now)
+	# Simplified "In Box" icon
+	var icon_mesh = MeshInstance3D.new()
+	icon_mesh.mesh = BoxMesh.new()
+	icon_mesh.mesh.size = Vector3(0.8, 0.8, 0.2)
+	
+	var icon_mat = StandardMaterial3D.new()
+	icon_mat.albedo_color = Color.GREEN
+	icon_mat.emission_enabled = true
+	icon_mat.emission = Color.GREEN
+	icon_mat.emission_energy_multiplier = 0.5
+	icon_mesh.material_override = icon_mat
+	
+	drop_target_root.add_child(icon_mesh)
+
+func show_reparent_feedback():
+	if is_reparent_open: return
+	is_reparent_open = true
+	
+	lid_root.visible = true
+	lid_root.rotation_degrees.x = 0
+	
+	var tween = create_tween().set_parallel(true)
+	# Open Lid (Rotate up 110 degrees)
+	tween.tween_property(lid_root, "rotation_degrees:x", 110.0, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	
+	# Pop out Icon
+	tween.tween_property(drop_target_root, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(drop_target_root, "position:z", 0.5, 0.4) # Move forward
+
+func hide_reparent_feedback():
+	if not is_reparent_open: return
+	is_reparent_open = false
+	
+	var tween = create_tween().set_parallel(true)
+	# Close Lid
+	tween.tween_property(lid_root, "rotation_degrees:x", 0.0, 0.3).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	
+	# Hide Icon
+	tween.tween_property(drop_target_root, "scale", Vector3.ZERO, 0.3)
+	tween.tween_property(drop_target_root, "position:z", 0.1, 0.3)
+	
+	tween.chain().tween_callback(func(): lid_root.visible = false)
+
+func get_drop_target_global_position() -> Vector3:
+	return drop_target_root.global_position
+
+func _create_badge_visuals():
+	badge_root = Node3D.new()
+	add_child(badge_root)
+	# Position top-right: x=1.0, y=1.0. Move slightly out to (1.1, 1.1)
+	badge_root.position = Vector3(1.1, 1.1, 0.2)
+	
+	# Red Sphere
+	var mesh = MeshInstance3D.new()
+	mesh.mesh = SphereMesh.new()
+	mesh.mesh.radius = 0.25
+	mesh.mesh.height = 0.5
+	
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color.RED
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material_override = mat
+	
+	badge_root.add_child(mesh)
+	
+	# Number
+	badge_label = Label3D.new()
+	badge_label.text = "0"
+	badge_label.font_size = 48 # Scaled down by pixel_size?
+	badge_label.pixel_size = 0.005
+	badge_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	badge_label.no_depth_test = true
+	badge_label.render_priority = 10 # On top
+	badge_label.outline_render_priority = 9
+	badge_label.modulate = Color.WHITE
+	badge_label.outline_modulate = Color.WHITE # Ensure visibility
+	
+	badge_root.add_child(badge_label)
+	badge_label.position.z = 0.26 # In front of sphere
+	
+	badge_root.visible = false
