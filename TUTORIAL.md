@@ -1,0 +1,35 @@
+# 3D MoodBoard - Tutorial
+
+## How to Use
+
+### Controls
+-   **Mouse Left Click**: Select / Drag Nodes.
+-   **Right Click (Hold)**: Rotate Camera.
+-   **Mouse Wheel**: Zoom In/Out.
+-   **WASD / Arrow Keys**: Move Camera.
+-   **F / Timeline / Grid Buttons**: Switch View Modes.
+-   **Right Click (Double Click)**: Paste Node (if copied).
+-   **Ctrl+C**: Copy Selected Node.
+-   **Ctrl+V**: Paste (Image or Node).
+
+### Board Management
+-   **Create New**: Enter a name in the main menu to create a new `.moo` board file.
+-   **Load**: Open existing board files.
+-   **Settings**: Accessed from Main Menu.
+    -   Select Background Wallpaper.
+    -   Upload new Background Images.
+    -   Toggle Auto-Save logic.
+
+### Node Interaction
+-   **Add Node**: Click the "+" button bottom-left.
+-   **Edit Node**: Select a node to open the Sidebar.
+    -   Change Name, Color.
+    -   Reparent nodes (Drag one node over another to nest them).
+    -   **Font Size**: Adjust the slider to change text size.
+    -   **Background**: Toggle "Show Background" to hide the node color.
+-   **Delete Mode**: Toggle Delete Mode (Trash Icon) to remove nodes by clicking.
+-   **Recycle Bin**: Drag nodes to the bottom "Drop here to delete" zone.
+
+### File Support
+-   Drag and drop images (`.png`, `.jpg`, `.jpeg`) from your computer onto the board.
+-   Import text or other files.

@@ -13,31 +13,9 @@ Nodes can be entered and other nodes can be created inside it. Images can be dra
 
 ## How to Use
 
-### Controls
--   **Mouse Left Click**: Select / Drag Nodes.
--   **Right Click (Hold)**: Rotate Camera.
--   **Mouse Wheel**: Zoom In/Out.
--   **WASD / Arrow Keys**: Move Camera.
--   **F / Timeline / Grid Buttons**: Switch View Modes.
+👉 **[Click here to view the Full Tutorial](TUTORIAL.md)**
 
-### Board Management
--   **Create New**: Enter a name in the main menu to create a new `.moo` board file.
--   **Load**: Open existing board files.
--   **Settings**: Accessed from Main Menu.
-    -   Select Background Wallpaper.
-    -   Upload new Background Images.
-    -   Toggle Auto-Save logic.
-
-### Node Interaction
--   **Add Node**: Click the "+" button bottom-left.
--   **Edit Node**: Select a node to open the Sidebar.
-    -   Change Name, Color.
-    -   Reparent nodes (Drag one node over another to nest them).
--   **Delete Mode**: Toggle Delete Mode (Trash Icon) to remove nodes by clicking.
-
-### File Support
--   Drag and drop images, text, or use the "Add" button.
--   Supports `.png`, `.jpg`, `.jpeg`.
+(Includes Controls, Board Management, Node Interaction, and File Support)
 
 ## Project Structure
 -   `Scenes/`: Main scenes (Main, UI, MoodNode).
