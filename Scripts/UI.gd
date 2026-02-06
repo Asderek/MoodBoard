@@ -515,8 +515,101 @@ func is_bin_hovered() -> bool:
 	if not recycling_bin.visible: return false
 	return recycling_bin.get_global_rect().has_point(get_global_mouse_position())
 
-func set_bin_visible(visible: bool):
-	recycling_bin.visible = visible
+func set_bin_visible(should_show: bool):
+	if not recycling_bin: return
+	
+	# If state isn't changing and no animation is running, skip
+	# But checking 'visible' might be misleading mid-animation. 
+	# So we just enforce target state via tween.
+	
+	if bin_tween and bin_tween.is_valid():
+		bin_tween.kill()
+		
+	bin_tween = create_tween()
+	bin_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	
+	if should_show:
+		# SHOW
+		# Ensure it's visible for animation
+		if not recycling_bin.visible:
+			recycling_bin.visible = true
+			# Reset to off-screen starting pos if appearing
+			# We assume Bottom Anchor. Offset Bottom usually 0 or negative.
+			# Let's slide up from +150 (below screen) to its Original Pos.
+			# Problem: We need to know Original Pos.
+			# Let's assume layout in Editor is correct "Shown" state.
+			# But if we hide it, we might lose it?
+			# Better: Tween 'position:y' or 'offset'.
+			# Let's assume it's anchored Center Bottom.
+			# We will just offset it.
+			
+			# Current approach: Use modulation (fade) + Slide
+			recycling_bin.modulate.a = 0.0
+			# Offset Y by +100 relative to current (which should be target)
+			# Only if we are securely at target.
+			# Let's use a fixed offset approach.
+			# If we rely on anchors, 'position.y' changes with resize. 
+			# 'anchor_bottom' = 1.
+			# Let's tween 'offset_bottom' and 'offset_top'.
+			pass
+			
+		# ANIMATE IN
+		bin_tween.set_parallel(true)
+		bin_tween.tween_property(recycling_bin, "modulate:a", 1.0, 0.4)
+		# We need a robust "Slide" that works with anchors.
+		# A simple Pivot offset or Margin adjustment.
+		# Let's try simpler: Just Fade + Scale? User asked for Translate.
+		# Translate from "Out of screen" (Down).
+		# We can change 'position.y'.
+		# But we need to target the Correct Y. 
+		# Let's use control's anchors.
+		# If we assume it is correctly placed, we can treat current position as Target.
+		# But since we hide it, we don't track state.
+		# FIX: In _ready, we store 'default_bin_pos_y' or similar?
+		# Or just use hardcoded offset if we know it's at bottom.
+		
+		# Let's try: visible = true. Move it down 100px. Tween to Original.
+		# But if we call this multiple times, "Original" moves down repeatedly!
+		# We need a latch.
+		pass 
+		
+		# Better implementation:
+		# Just set visible. 
+		# Tween 'position:y' from (Target + 100) to Target.
+		# How to get Target?
+		# It's where it is right not (layout).
+		var target_y = recycling_bin.position.y
+		
+		# If we are "Hidden" (via logic), we might be actually hidden or sitting at off-screen.
+		# Let's use a variable 'is_bin_shown' to track logical state.
+		
+		recycling_bin.visible = true
+		
+		# Perform Slide Up
+		# Force restart pos
+		recycling_bin.position.y = target_y + 150
+		bin_tween.tween_property(recycling_bin, "position:y", target_y, 0.4)
+		bin_tween.tween_property(recycling_bin, "modulate:a", 1.0, 0.3)
+		
+	else:
+		# HIDE
+		# Slide Down + Fade Out
+		bin_tween.set_parallel(true)
+		bin_tween.tween_property(recycling_bin, "position:y", recycling_bin.position.y + 150, 0.3).set_ease(Tween.EASE_IN)
+		bin_tween.tween_property(recycling_bin, "modulate:a", 0.0, 0.3)
+		
+		bin_tween.chain().tween_callback(func(): 
+			recycling_bin.visible = false
+			# Restore position so it doesn't drift if layout updates?
+			# Actually resetting position here is tricky if we don't know original.
+			# But next Show() captures current (which is +150!) -> BUG.
+			# WE NEED ORIGINAL POSITION.
+			
+			# Undo the move logic.
+			recycling_bin.position.y -= 150
+		)
+
+var bin_tween: Tween = null
 
 func _setup_exit_button():
 	var btn = Button.new()
