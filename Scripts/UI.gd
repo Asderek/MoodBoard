@@ -82,6 +82,9 @@ func _ready():
 	_setup_bottom_left_buttons()
 	_setup_toast_ui()
 	
+	_setup_toast_ui()
+	# _setup_settings_menu() # REVERTED: Moved to Main Menu
+	
 	sidebar.visible = false # Ensure sidebar is hidden on load
 	
 	# Fix: Explicitly connect delete buttons (missing from previous cleanup)
@@ -132,6 +135,43 @@ func _setup_bg_toggle():
 	vbox.move_child(show_bg_checkbox, 2)
 	
 	show_bg_checkbox.toggled.connect(_on_bg_toggled)
+
+	show_bg_checkbox.toggled.connect(_on_bg_toggled)
+	
+	_setup_font_slider()
+
+var font_size_slider: HSlider = null
+var font_size_label: Label = null
+
+func _setup_font_slider():
+	var vbox = $ForegroundLayer/Sidebar/VBoxContainer
+	
+	# Container for label and slider
+	var hbox = HBoxContainer.new()
+	vbox.add_child(hbox)
+	vbox.move_child(hbox, 3) # After ShowBG (2)
+	
+	font_size_label = Label.new()
+	font_size_label.text = "Font Size: 144"
+	hbox.add_child(font_size_label)
+	
+	font_size_slider = HSlider.new()
+	font_size_slider.min_value = 48
+	font_size_slider.max_value = 300
+	font_size_slider.step = 12
+	font_size_slider.value = 144
+	font_size_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	font_size_slider.value_changed.connect(_on_font_size_changed)
+	hbox.add_child(font_size_slider)
+
+func _on_font_size_changed(value):
+	font_size_label.text = "Font Size: " + str(value)
+	if current_node_ref and is_instance_valid(current_node_ref):
+		if current_node_ref.has_method("set_font_size"):
+			current_node_ref.set_font_size(int(value))
+	
+	if not current_node_data.is_empty():
+		current_node_data["font_size"] = int(value)
 
 func _on_bg_toggled(pressed: bool):
 	if current_node_data.is_empty(): return

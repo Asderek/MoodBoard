@@ -1,6 +1,6 @@
 extends Area3D
 
-signal node_clicked(node) # Renamed to node_entered for consistency? Kept old name for now or refactor. User asked for "enter". Let's use node_entered.
+# signal node_clicked(node) # Removed unused signal
 signal node_entered(node)
 signal node_selected(node, is_multi)
 signal node_hovered(node)
@@ -104,11 +104,23 @@ func update_visuals():
 	mat.albedo_color = target_color
 	mat.roughness = 0.2
 	mat.metallic = 0.1
+	
+	# Create Outline (Mesh-Based)
 	visual_mesh.material_override = mat
+	
+	_update_outline_mesh()
 	
 	# Show/Hide Background
 	var show_bg = node_data.get("use_bg_color", true) # Default to true
 	visual_mesh.visible = show_bg
+	
+	# Font Size & Outline
+	var f_size = int(node_data.get("font_size", 144))
+	label.font_size = f_size
+	
+	# Add Black Outline (Same as Badge)
+	label.outline_modulate = Color.BLACK
+	label.outline_size = 48
 	
 	update_badge()
 
@@ -127,10 +139,56 @@ func update_badge():
 	else:
 		badge_root.visible = false
 
-func set_show_background(show: bool):
-	node_data["use_bg_color"] = show
-	visual_mesh.visible = show
+func set_show_background(should_show: bool):
+	node_data["use_bg_color"] = should_show
+	visual_mesh.visible = should_show
+	if outline_mesh: outline_mesh.visible = should_show
 	set_selected(is_selected) # Refresh selection visibility logic
+
+func set_font_size(new_size: int):
+	node_data["font_size"] = new_size
+	label.font_size = new_size
+
+var outline_mesh: MeshInstance3D = null
+
+func _update_outline_mesh():
+	if not outline_mesh:
+		outline_mesh = MeshInstance3D.new()
+		# Assuming visual_mesh uses a BoxMesh, we create a slightly larger one
+		# Or generic scaled box
+		var mesh = BoxMesh.new()
+		# Match visual mesh size?
+		# visual_mesh usually has size (2.0, 2.0, 0.2) or similar? 
+		# We can just check visual_mesh.mesh.size if accessible, or hardcode based on knowns.
+		# From selection logic: mesh.size = Vector3(2.1, 2.1, 0.15)
+		# Let's try to match the Visual's AABB or just scale.
+		
+		# Better: Use same mesh resource if possible, or new box.
+		if visual_mesh.mesh is BoxMesh:
+			mesh.size = visual_mesh.mesh.size
+		else:
+			mesh.size = Vector3(2.0, 2.0, 0.2) # Fallback default
+			
+		outline_mesh.mesh = mesh
+		
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color.BLACK
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.cull_mode = BaseMaterial3D.CULL_FRONT # Inverted Hull
+		mat.grow_enabled = true
+		mat.grow_amount = 0.05 # Grow works better on single inverted mesh sometimes?
+		# Actually, for Sharp Box, simple scale is safer
+		# Let's Disable Grow and just Scale
+		mat.grow_enabled = false
+		
+		outline_mesh.material_override = mat
+		
+		visual_mesh.add_child(outline_mesh)
+		# Scale up (Thinner outline)
+		outline_mesh.scale = Vector3(1.05, 1.05, 1.05) 
+		
+	# Ensure visibility matches
+	outline_mesh.visible = visual_mesh.visible
 
 func _load_file_content(path: String):
 	# Create Sprite if missing
@@ -157,7 +215,7 @@ func _load_file_content(path: String):
 			
 			# Scale sprite to fit nicely within 2x2 bounds?
 			# Node visual is approx 2.0 width.
-			var aspect = float(img.get_width()) / float(img.get_height())
+			# var aspect = float(img.get_width()) / float(img.get_height())
 			
 			# Constrain to width 1.8
 			var target_w = 1.8
@@ -191,7 +249,7 @@ func _ready():
 	label.pixel_size = 0.002 
 	label.width = 1.8 / label.pixel_size # Width is in pixels! 1.8m / 0.002 = 900px
 	label.font_size = 144 # Increased by 50% (was 96)
-	label.outline_size = 12
+	label.outline_size = 48
 	
 	_create_selection_visual()
 	_create_resize_handle()
@@ -233,7 +291,7 @@ func _create_resize_handle():
 	
 	resize_handle.input_event.connect(_on_resize_input)
 
-func _on_resize_input(camera, event, position, normal, shape_idx):
+func _on_resize_input(_camera, event, _position, _normal, _shape_idx):
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
@@ -520,9 +578,12 @@ func _create_badge_visuals():
 	badge_label.render_priority = 10 # On top
 	badge_label.outline_render_priority = 9
 	badge_label.modulate = Color.WHITE
-	badge_label.outline_modulate = Color.WHITE # Ensure visibility
+	badge_label.outline_modulate = Color.BLACK 
+	badge_label.outline_size = 24
 	
 	badge_root.add_child(badge_label)
-	badge_label.position.z = 0.26 # In front of sphere
+	# Fix: Remove Z offset to prevent perspective parallax/drifting.
+	# Since no_depth_test is true, it will still render on top of the sphere.
+	badge_label.position.z = 0.0 
 	
 	badge_root.visible = false

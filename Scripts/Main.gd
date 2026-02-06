@@ -111,32 +111,150 @@ func _ready():
 	_spawn_layer(mood_data, Vector3.ZERO)
 
 func _setup_environment():
-	# Create WorldEnvironment for Starry Skybox
-	var world_env = WorldEnvironment.new()
-	var env = Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.background_energy_multiplier = 1.0
+	# 3D "SCREEN SPACE" BACKGROUND IMPLEMENTATION
+	# Problem: CanvasLayer renders ON TOP of 3D.
+	# Problem: Transparent Viewport + CanvasLayer is complex.
+	# Solution: A MeshInstance3D (Quad) attached to the Camera, positioned far away.
+	# It uses a Shader to project the texture in "Screen Space" (like a wallpaper), 
+	# correcting for Aspect Ratio (Cover Mode).
 	
-	var sky = Sky.new()
-	var sky_mat = PanoramaSkyMaterial.new()
-	
-	# Load texture (universe.png)
-	if ResourceLoader.exists("res://universe.png"):
-		var tex = load("res://universe.png")
-		sky_mat.panorama = tex
-	else:
-		print("Warning: res://universe.png not found")
+	# 1. Cleanup Old (if any)
+	if get_viewport().transparent_bg:
+		get_viewport().transparent_bg = false
 		
-	sky.sky_material = sky_mat
-	env.sky = sky
+	# 2. Config Texture
+	var texture_path = ""
 	
-	# Ambient Light from Sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.0 # Adjust brightness if needed
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC # Better colors
+	# Check Global Priority First
+	if Global.selected_background != "" and (ResourceLoader.exists(Global.selected_background) or FileAccess.file_exists(ProjectSettings.globalize_path(Global.selected_background))):
+		texture_path = Global.selected_background
+	else:
+		# Fallback Search
+		var potential_paths = ["res://backgrounds/stars.jpg", "res://backgrounds/universe.png", "res://backgrounds/universe.jpg", "res://stars.jpg", "res://universe.png"]
+		
+		for path in potential_paths:
+			if ResourceLoader.exists(path) or FileAccess.file_exists(ProjectSettings.globalize_path(path)):
+				texture_path = path
+				break
 	
-	world_env.environment = env
-	add_child(world_env)
+	if texture_path == "":
+		print("Warning: No background texture found.")
+		return # Default clear color (Black/Grey) will show
+	
+	# Save found default to global if empty
+	if Global.selected_background == "":
+		Global.selected_background = texture_path
+		
+	var tex = _load_texture_robust(texture_path)
+	
+	# 3. Create Background Plate
+	# Ensure we have reference to camera
+	if not camera:
+		camera = $Camera3D
+		
+	var plate = MeshInstance3D.new()
+	plate.name = "BackgroundPlate"
+	plate.mesh = QuadMesh.new()
+	# Make it HUGE so it covers the frustum even at far distance
+	# Previous size (1000) was too small for 16:9 at Z=-500 (Needs ~1350)
+	plate.mesh.size = Vector2(10000, 10000)
+	
+	# Position: In front of camera, far away (Local Z -500)
+	# Main Camera creates frustum. Z=-500 should be safe behind everything.
+	plate.position = Vector3(0, 0, -500)
+	
+	camera.add_child(plate)
+	
+	# 4. Shader Material
+	# ... (Existing Shader Code) ...
+	var mat = ShaderMaterial.new()
+	var shader_code = """
+	shader_type spatial;
+	render_mode unshaded, cull_disabled; // No lighting, show back usage
+
+	uniform sampler2D bg_texture : source_color, filter_linear_mipmap;
+
+	void vertex() {
+		// No vertex manip needed
+	}
+
+	void fragment() {
+		vec2 tex_size = vec2(textureSize(bg_texture, 0));
+		float tex_aspect = tex_size.x / tex_size.y;
+		float screen_aspect = VIEWPORT_SIZE.x / VIEWPORT_SIZE.y;
+		
+		vec2 scale = vec2(1.0);
+		
+		if (screen_aspect > tex_aspect) {
+			scale.y = tex_aspect / screen_aspect;
+		} else {
+			scale.x = screen_aspect / tex_aspect;
+		}
+		
+		vec2 final_uv = (SCREEN_UV - 0.5) * scale + 0.5;
+		ALBEDO = texture(bg_texture, final_uv).rgb;
+	}
+	"""
+	var shader = Shader.new()
+	shader.code = shader_code
+	mat.shader = shader
+	mat.set_shader_parameter("bg_texture", tex)
+	
+	plate.material_override = mat
+
+func get_available_backgrounds() -> Array:
+	var files = []
+	var dir = DirAccess.open("res://backgrounds")
+	if dir:
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			if not dir.current_is_dir() and not file_name.ends_with(".import"):
+				if file_name.ends_with(".png") or file_name.ends_with(".jpg") or file_name.ends_with(".jpeg"):
+					files.append("res://backgrounds/" + file_name)
+			file_name = dir.get_next()
+	return files
+
+func set_background_from_path(path: String):
+	# Try loading texture robustly
+	var tex = _load_texture_robust(path)
+	
+	if not tex:
+		print("Error: Could not load background texture: ", path)
+		return
+
+	# Find the plate (it's attached to the camera)
+	if not camera: camera = $Camera3D
+	var plate = camera.get_node_or_null("BackgroundPlate")
+	
+	if plate and plate.material_override:
+		plate.material_override.set_shader_parameter("bg_texture", tex)
+	else:
+		# If plate doesn't exist yet (e.g. initial setup skipped), verify setup?
+		# But _setup_environment creates it.
+		# If we are calling this, environment should imply setup.
+		# Force restart environment setup if needed?
+		print("Warning: Background Plate not found, restarting environment setup...")
+		_setup_environment() # This will reload everything, might be overkill but safe.
+
+func _load_texture_robust(path: String) -> Texture2D:
+	# 1. Try Standard Resource Load (Best for Imported Assets)
+	if ResourceLoader.exists(path):
+		var res = load(path)
+		if res is Texture2D:
+			return res
+			
+	# 2. Fallback: Runtime Image Load (For User Uploads / Non-Imported)
+	# Convert res:// to absolute path if needed
+	var global_path = ProjectSettings.globalize_path(path)
+	
+	if FileAccess.file_exists(global_path):
+		var img = Image.load_from_file(global_path)
+		if img:
+			return ImageTexture.create_from_image(img)
+			
+	return null
+
 
 func save_data():
 	# Don't save in Tutorial Mode
@@ -159,7 +277,6 @@ func load_data():
 		if FileAccess.file_exists(DEFAULT_DATA_PATH):
 			var file = FileAccess.open(DEFAULT_DATA_PATH, FileAccess.READ)
 			if _parse_json_file(file) == OK:
-				print("Loaded Tutorial Data")
 				return
 		
 		# Fallback to empty if default missing
@@ -170,12 +287,10 @@ func load_data():
 	if Global.current_file_path != "" and FileAccess.file_exists(Global.current_file_path):
 		var file = FileAccess.open(Global.current_file_path, FileAccess.READ)
 		if _parse_json_file(file) == OK:
-			print("Loaded Board: ", Global.current_file_path)
 			return
 			
 	# 3. New File (or missing)
 	if Global.current_file_path != "":
-		print("Creating New Board: ", Global.current_file_path)
 		var board_name = Global.current_file_path.get_file().get_basename()
 		mood_data = {"name": board_name, "color": Color.hex(0x4B0082FF).to_html(), "children": []}
 		save_data() # Create the file
@@ -323,7 +438,6 @@ func _handle_copy_command():
 	var node = selected_nodes.back()
 	if is_instance_valid(node):
 		clipboard_node_data = node.node_data.duplicate(true)
-		print("Copied via Shortcut: ", clipboard_node_data.get("name"))
 		if ui_layer and ui_layer.has_method("show_toast"):
 			ui_layer.show_toast("Node Copied!")
 
