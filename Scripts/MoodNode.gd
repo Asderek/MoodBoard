@@ -40,7 +40,6 @@ func _on_input_event(_camera, event, _position, _normal, _shape_idx):
 						if event.is_command_or_control_pressed() or event.shift_pressed:
 							is_multi = true
 						
-						print("MoodNode: Click Detected on ", name, ", Emitting Selected")
 						emit_signal("node_selected", self, is_multi)
 				
 				# Consume the release event too so Main doesn't see it (though safety guard handles it too)
@@ -376,76 +375,118 @@ func save_scale_to_main():
 # --- REPARENTING VISUALS ---
 
 func _create_reparent_visuals():
-	# 1. Lid Root (Pivot at Top Edge)
+	# 1. Lid Root (Pivot at Top-Right Edge of the TOP FACE)
 	lid_root = Node3D.new()
 	add_child(lid_root)
-	lid_root.position = Vector3(0, 1.0, 0.15) # Top edge, slightly in front
+	# Pivot at Top-Right Corner (x=1.0, y=1.0)
+	# Depth (z) should be center of node depth (0.0 because box is usually centered on 0 Z?)
+	# Node body is usually thin (0.2 depth).
+	lid_root.position = Vector3(1.0, 1.0, 0.0)
 	
-	# Lid Mesh (Covers the face)
+	# Lid Mesh (Represents the TOP face)
 	var lid_mesh = MeshInstance3D.new()
 	lid_mesh.mesh = BoxMesh.new()
-	lid_mesh.mesh.size = Vector3(2.0, 2.0, 0.05)
+	# Size: Width=2.0 (Full width), Height=0.05 (Thin), Depth=0.4 (Cover slightly more than node depth 0.2)
+	lid_mesh.mesh.size = Vector3(2.0, 0.05, 0.4)
 	
-	# Material (Darker slightly transparent?)
+	# Material (Red/Darker as requested "Red Lid")
 	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.2, 0.2, 0.2, 0.8)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.8, 0.2, 0.2, 0.9) # Red-ish
+	# mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	lid_mesh.material_override = mat
 	
 	lid_root.add_child(lid_mesh)
-	lid_mesh.position = Vector3(0, -1.0, 0) # Center relative to pivot is down
+	# Offset mesh: 
+	# Pivot is at Right edge (x=1). Mesh width is 2. Center needs to be at x=-1 relative to pivot?
+	# No, center of mesh relative to pivot (1,1).
+	# Mesh Center should be (0, 1.05, 0) in global terms? No.
+	# Relative to Pivot (1.0): Center at (-1.0) makes it reach from 0 to -2 relative to pivot -> 1 to -1 global. Correct.
+	# Y pos: 0 relative to pivot (pivot is at top surface).
+	lid_mesh.position = Vector3(-1.0, 0, 0) 
 	
 	lid_root.visible = false # Hidden by default
 	
 	# 2. Drop Target (Icon)
 	drop_target_root = Node3D.new()
 	add_child(drop_target_root)
-	drop_target_root.position = Vector3(0, 0, 0.1)
+	# Position: Center of TOP "Face" (y=1.0). 
+	# User wants it "on top of the node".
+	# Start at Y=0 (inside) for animation pop-up
+	# Z = -0.1 to ensure it is behind the front face / inside the box
+	drop_target_root.position = Vector3(0, 0.0, -0.1) 
 	drop_target_root.scale = Vector3.ZERO # Hidden initially
+	drop_target_root.visible = false
 	
-	# Create Arrow Geometry (Cylinder + Cone? Or just a box for now)
-	# Simplified "In Box" icon
-	var icon_mesh = MeshInstance3D.new()
-	icon_mesh.mesh = BoxMesh.new()
-	icon_mesh.mesh.size = Vector3(0.8, 0.8, 0.2)
-	
-	var icon_mat = StandardMaterial3D.new()
-	icon_mat.albedo_color = Color.GREEN
-	icon_mat.emission_enabled = true
-	icon_mat.emission = Color.GREEN
-	icon_mat.emission_energy_multiplier = 0.5
-	icon_mesh.material_override = icon_mat
-	
-	drop_target_root.add_child(icon_mesh)
+	# 3. Procedural Arrow Icon (Loaded from Scene)
+	# Pre-created asset as requested.
+	var icon_scene = preload("res://Scenes/ReparentIcon.tscn")
+	var icon_instance = icon_scene.instantiate()
+	drop_target_root.add_child(icon_instance)
+
+
+
+
+
+# State for animation cancellation
+var reparent_tween: Tween = null
 
 func show_reparent_feedback():
-	if is_reparent_open: return
+	# If already open, ignore, unless we want to force refresh? 
+	# Actually, if we are mid-animation, we should let it finish or just clamping state.
+	# But if we want to be safe against race conditions:
+	
+	if is_reparent_open: return 
 	is_reparent_open = true
 	
 	lid_root.visible = true
-	lid_root.rotation_degrees.x = 0
+	lid_root.rotation_degrees = Vector3.ZERO # Reset
 	
-	var tween = create_tween().set_parallel(true)
-	# Open Lid (Rotate up 110 degrees)
-	tween.tween_property(lid_root, "rotation_degrees:x", 110.0, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# Kill any ongoing animation (e.g. closing)
+	if reparent_tween and reparent_tween.is_valid():
+		reparent_tween.kill()
+		
+	reparent_tween = create_tween().set_parallel(true)
 	
-	# Pop out Icon
-	tween.tween_property(drop_target_root, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
-	tween.tween_property(drop_target_root, "position:z", 0.5, 0.4) # Move forward
+	# Open Lid: Rotate Z (Clockwise / Negative).
+	# From Horizontal (0) to "Up and Right". 
+	# -90 deg makes it Vertical (Standing on Right edge).
+	# -120 deg makes it lean out further.
+	reparent_tween.tween_property(lid_root, "rotation_degrees:z", -120.0, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	
+	# Pop out Icon (Scale + Move Up)
+	# Reset Start Pos just in case
+	drop_target_root.position.y = 0.0
+	
+	reparent_tween.tween_property(drop_target_root, "scale", Vector3.ONE, 0.4).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	reparent_tween.tween_property(drop_target_root, "position:y", 1.5, 0.4).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	
+	# Ensure Drop Target is visible
+	drop_target_root.visible = true
+
 
 func hide_reparent_feedback():
 	if not is_reparent_open: return
 	is_reparent_open = false
 	
-	var tween = create_tween().set_parallel(true)
+	# Kill opening animation if active
+	if reparent_tween and reparent_tween.is_valid():
+		reparent_tween.kill()
+		
+	reparent_tween = create_tween().set_parallel(true)
+	
 	# Close Lid
-	tween.tween_property(lid_root, "rotation_degrees:x", 0.0, 0.3).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	reparent_tween.tween_property(lid_root, "rotation_degrees:z", 0.0, 0.3).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	
-	# Hide Icon
-	tween.tween_property(drop_target_root, "scale", Vector3.ZERO, 0.3)
-	tween.tween_property(drop_target_root, "position:z", 0.1, 0.3)
+	# Hide Icon (Scale Down + Move Down)
+	reparent_tween.tween_property(drop_target_root, "scale", Vector3.ZERO, 0.3)
+	reparent_tween.tween_property(drop_target_root, "position:y", 0.0, 0.3)
 	
-	tween.chain().tween_callback(func(): lid_root.visible = false)
+	# Callback to hide only if we are still closed (redundant generally but safe)
+	reparent_tween.chain().tween_callback(func(): 
+		if not is_reparent_open:
+			lid_root.visible = false
+			drop_target_root.visible = false
+	)
 
 func get_drop_target_global_position() -> Vector3:
 	return drop_target_root.global_position

@@ -41,6 +41,29 @@ var timeline_item_width = 3.0 # Changed to var for slider control
 
 var timeline_lines_mesh: MeshInstance3D = null
 
+func _input(event):
+	# Global Release Handler for Dragging
+	# Fixes issue where target node captures input, preventing release event on dragged node
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			if current_dragging_node and is_instance_valid(current_dragging_node):
+				var node = current_dragging_node
+				
+				# Force state update on node if it hasn't processed it yet
+				if node.get("is_dragging"):
+					node.is_dragging = false
+					node.emit_signal("node_drag_ended", node)
+					# Note: The signal connection calls _on_node_drag_ended, 
+					# which calls _check_reparent_drop. 
+					# BUT since we are handling it here, we might double-call if the node ALSO fired.
+					# Let's trust logic: 
+					# If node fired, is_dragging is false.
+					# If node didn't fire, is_dragging is true.
+					# So only if node.is_dragging, we fire.
+					# AND since we just emitted signal, Main's _on_node_drag_ended runs.
+					# So we don't need to call _check_reparent_drop explicitly here if signal works.
+
+
 
 func _ready():
 	var ui_scene = preload("res://Scenes/UI.tscn").instantiate()
@@ -75,18 +98,45 @@ func _ready():
 
 	# Camera connection removed (no longer needed for rotation)
 	
-	# Enable Transparent BG so UI BackgroundLayer (Layer -1) is visible behind 3D nodes
-	# get_viewport().transparent_bg = true # REVERTED: Causes occlusion issues with 2D layers
+	_setup_environment()
 	
 	load_data()
 	
 	if mood_data.is_empty():
 		# Fallback if both files fail
 		mood_data = {"name": "Empty Board", "color": Color.GRAY.to_html(), "children": []}
-	
+		
 	# Pool initialization removed
 		
 	_spawn_layer(mood_data, Vector3.ZERO)
+
+func _setup_environment():
+	# Create WorldEnvironment for Starry Skybox
+	var world_env = WorldEnvironment.new()
+	var env = Environment.new()
+	env.background_mode = Environment.BG_SKY
+	env.background_energy_multiplier = 1.0
+	
+	var sky = Sky.new()
+	var sky_mat = PanoramaSkyMaterial.new()
+	
+	# Load texture (universe.png)
+	if ResourceLoader.exists("res://universe.png"):
+		var tex = load("res://universe.png")
+		sky_mat.panorama = tex
+	else:
+		print("Warning: res://universe.png not found")
+		
+	sky.sky_material = sky_mat
+	env.sky = sky
+	
+	# Ambient Light from Sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 1.0 # Adjust brightness if needed
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC # Better colors
+	
+	world_env.environment = env
+	add_child(world_env)
 
 func save_data():
 	# Don't save in Tutorial Mode
@@ -410,7 +460,7 @@ func _update_drag_hover():
 	# Check interactions with other nodes
 	for other in node_root.get_children():
 		if other == current_dragging_node: continue
-		if other.is_in_group("header_node"): continue # Headers handled separately if needed, or same logic
+		# if other.is_in_group("header_node"): continue # ENABLED for visual feedback!
 		if not is_instance_valid(other): continue
 		if other.is_queued_for_deletion(): continue
 		if other.has_method("is_marked_for_deletion") and other.is_marked_for_deletion(): continue
@@ -659,11 +709,9 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 var last_selection_time = 0
 
 func _on_node_selected(node, _is_multi):
-	print("Main: Node Selected! Name: ", node.node_data.get("name"), " | DeleteMode: ", is_delete_mode)
 	last_selection_time = Time.get_ticks_msec()
 	
 	if is_delete_mode:
-		print("Main: Toggling mark on node")
 		# Toggle "Marked" status
 		if node in nodes_marked_for_deletion:
 			node.set_marked_for_deletion(false)
@@ -678,7 +726,6 @@ func _on_node_selected(node, _is_multi):
 		return
 
 	# Standard Selection Logic (Only if not in delete mode)
-	print("Main: Standard Selection")
 	clear_selection()
 	node.set_selected(true)
 	selected_nodes.append(node)
@@ -687,7 +734,6 @@ func _on_node_selected(node, _is_multi):
 		ui_layer.show_sidebar(node.node_data, node)
 
 func _on_delete_mode_toggled(active: bool):
-	print("Main: Delete Mode Toggled. Active: ", active)
 	if active:
 		if is_delete_mode and not nodes_marked_for_deletion.is_empty():
 			# If already active and has items -> This is CONFIRM
@@ -854,39 +900,21 @@ func _handle_paste_from_clipboard():
 			ui_layer.show_toast("Node Pasted!")
 
 func _check_reparent_drop(dropped_node) -> bool:
-	var drop_pos = dropped_node.global_position # Use global for safety against local offsets
+	# VISUAL STATE BASED LOGIC
+	# If a node is currently providing feedback (Lid Open), we drop into it.
+	# If no node is providing feedback, we do not drop.
 	
-	# 1. Check VISUAL TARGET (Sibling Reparent)
 	if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
-		# If we are hovering a node (lid is open), any drop nearby should trigger reparenting.
-		# The visual feedback (lid open) implies "Ready to accept".
-		# Let's check distance to the node itself, or just trust the hover state if close enough.
+		# Execute Drop
+		_execute_reparent_to_sibling(dropped_node, hovered_reparent_node)
 		
-		var dist = drop_pos.distance_to(hovered_reparent_node.global_position)
-		var accept_threshold = 2.0 # More permissive threshold (Node is size 2.0 approx)
-		
-		if dist < accept_threshold:
-			_execute_reparent_to_sibling(dropped_node, hovered_reparent_node)
-			
-			# Reset Visuals immediately
-			hovered_reparent_node.hide_reparent_feedback()
-			hovered_reparent_node = null
-			current_dragging_node = null
-			return true
-
-	# 2. Check ANCESTORS (Header Nodes) - Standard proximity logic
-	var header_nodes = get_tree().get_nodes_in_group("header_node")
-	for header in header_nodes:
-		var dist = dropped_node.position.distance_to(header.position)
-		if dist < 2.0:
-			_execute_reparent_to_ancestor(dropped_node, header)
-			current_dragging_node = null
-			return true
-			
-	# If no action taken, clear drag state
-	if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+		# Reset Visuals
 		hovered_reparent_node.hide_reparent_feedback()
-	
+		hovered_reparent_node = null
+		current_dragging_node = null
+		return true
+
+	# No drop target active
 	hovered_reparent_node = null
 	current_dragging_node = null
 	return false

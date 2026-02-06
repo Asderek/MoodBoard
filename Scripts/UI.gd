@@ -436,7 +436,6 @@ func _setup_bottom_left_buttons():
 
 
 func _on_delete_mode_pressed():
-	print("UI: Delete Mode Button Pressed")
 	# This button acts as "Enter Mode" OR "Confirm Delete" depending on state
 	emit_signal("delete_mode_toggled", true) 
 
