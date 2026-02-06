@@ -19,7 +19,6 @@ func _process_save_files():
 	if not DirAccess.dir_exists_absolute(path):
 		var err = DirAccess.make_dir_absolute(path)
 		if err != OK:
-			print("Failed to create save_files directory: ", err)
 			return
 			
 	# Auto-Rename .json -> .moo
@@ -37,9 +36,9 @@ func _process_save_files():
 					
 					var err = dir.rename(old_full_path, new_full_path)
 					if err == OK:
-						print("Renamed %s to %s" % [file_name, new_name])
+						pass
 					else:
-						print("Error renaming file %s: %s" % [file_name, error_string(err)])
+						pass
 						
 			file_name = dir.get_next()
 
@@ -106,7 +105,10 @@ func _setup_settings_panel():
 	var check = CheckBox.new()
 	check.text = "Auto-Save on Unselect"
 	check.button_pressed = Global.auto_save_on_unselect
-	check.toggled.connect(func(pressed): Global.auto_save_on_unselect = pressed)
+	check.toggled.connect(func(pressed): 
+		Global.auto_save_on_unselect = pressed
+		Global.save_settings()
+	)
 	vbox.add_child(check)
 	
 	vbox.add_child(HSeparator.new())
@@ -168,6 +170,7 @@ func _refresh_bg_list():
 func _on_bg_selected(index):
 	var path = bg_option_btn.get_item_metadata(index)
 	Global.selected_background = path
+	Global.save_settings()
 
 func _on_upload_pressed():
 	var fd = get_node("UploadDialog")
@@ -187,6 +190,7 @@ func _on_bg_uploaded(source_path):
 	# Select it logic inside refresh?
 	# Just refresh and finding it might be safe
 	Global.selected_background = dest_path # Pre-set selection
+	Global.save_settings()
 	_refresh_bg_list()
 
 func _on_new_pressed():
