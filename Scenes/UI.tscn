@@ -143,15 +143,7 @@ layout_mode = 2
 placeholder_text = "Node Name"
 wrap_mode = 1
 
-[node name="DescLabel" type="Label" parent="ForegroundLayer/Sidebar/VBoxContainer"]
-layout_mode = 2
-text = "Description:"
 
-[node name="DescEdit" type="TextEdit" parent="ForegroundLayer/Sidebar/VBoxContainer"]
-custom_minimum_size = Vector2(0, 150)
-layout_mode = 2
-placeholder_text = "Description..."
-wrap_mode = 1
 
 [node name="ColorLabel" type="Label" parent="ForegroundLayer/Sidebar/VBoxContainer"]
 layout_mode = 2

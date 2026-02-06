@@ -8,10 +8,48 @@ signal node_unhovered(node)
 signal node_drag_started(node)
 signal node_drag_ended(node)
 
+signal node_right_clicked(node)
+
 @onready var visual_mesh: MeshInstance3D = $Visual
 @onready var label: Label3D = $Label3D
 
-# Reparenting Visuals
+# ... (Existing code)
+
+func _on_input_event(_camera, event, _position, _normal, _shape_idx):
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				is_pressed = true
+				press_time = Time.get_ticks_msec()
+				get_viewport().set_input_as_handled() 
+				if event.double_click:
+					emit_signal("node_entered", self)
+					is_pressed = false 
+			else:
+				# Released
+				if is_dragging:
+					is_dragging = false
+					emit_signal("node_drag_ended", self)
+					var tween = create_tween()
+					tween.tween_property(self, "scale", original_scale * 1.05, 0.1)
+				else:
+					# Clicked
+					if is_pressed: 
+						var is_multi = false
+						# Allow Ctrl, Shift, or Command for multi-select
+						if event.is_command_or_control_pressed() or event.shift_pressed:
+							is_multi = true
+						
+						print("MoodNode: Click Detected on ", name, ", Emitting Selected")
+						emit_signal("node_selected", self, is_multi)
+				
+				# Consume the release event too so Main doesn't see it (though safety guard handles it too)
+				get_viewport().set_input_as_handled()
+				is_pressed = false
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				get_viewport().set_input_as_handled()
+				emit_signal("node_right_clicked", self)
 var lid_root: Node3D = null
 var drop_target_root: Node3D = null
 var is_reparent_open: bool = false
@@ -329,36 +367,7 @@ func _on_mouse_exited():
 		var tween = create_tween()
 		tween.tween_property(self, "scale", original_scale, 0.1)
 
-func _on_input_event(_camera, event, _position, _normal, _shape_idx):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed:
-				is_pressed = true
-				press_time = Time.get_ticks_msec()
-				get_viewport().set_input_as_handled() 
-				if event.double_click:
-					emit_signal("node_entered", self)
-					is_pressed = false 
-			else:
-				# Released
-				if is_dragging:
-					is_dragging = false
-					emit_signal("node_drag_ended", self)
-					var tween = create_tween()
-					tween.tween_property(self, "scale", original_scale * 1.05, 0.1)
-				else:
-					# Clicked
-					if is_pressed: 
-						var is_multi = false
-						# Allow Ctrl, Shift, or Command for multi-select
-						if event.is_command_or_control_pressed() or event.shift_pressed:
-							is_multi = true
-						
-						emit_signal("node_selected", self, is_multi)
-				
-				# Consume the release event too so Main doesn't see it (though safety guard handles it too)
-				get_viewport().set_input_as_handled()
-				is_pressed = false
+
 
 func save_scale_to_main():
 	# Trigger save in Main

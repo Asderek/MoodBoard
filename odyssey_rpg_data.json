@@ -1,0 +1,111 @@
+{
+	"name": "Odyssey RPG",
+	"color": "#1A1A1A",
+	"children": [
+		{
+			"name": "Epic: The Musical",
+			"color": "#4A90E2",
+			"description": "A musical adaptation of Homer's Odyssey by Jorge Rivera-Herrans.",
+			"children": [
+				{
+					"name": "Act 1: The Troy Saga",
+					"color": "#D0021B",
+					"description": "The end of the war and the beginning of the journey.",
+					"children": [
+						{ "name": "The Horse and the Infant", "color": "#F5A623", "description": "Odysseus must kill Astyanax to prevent future war.", "children": [] },
+						{ "name": "Just A Man", "color": "#F5A623", "description": "Odysseus grapples with his guilt.", "children": [] },
+						{ "name": "Full Speed Ahead", "color": "#F5A623", "description": "Departing for Ithaca.", "children": [] },
+						{ "name": "Open Arms", "color": "#F5A623", "description": "Polites advocates for kindness.", "children": [] },
+						{ "name": "Warrior of the Mind", "color": "#F5A623", "description": "Athena mentors Odysseus.", "children": [] }
+					]
+				},
+				{
+					"name": "Act 1: The Cyclops Saga",
+					"color": "#D0021B",
+					"description": "Encounter with Polyphemus.",
+					"children": [
+						{ "name": "Polyphemus", "color": "#7B8D93", "description": "Trapped in the cave.", "children": [] },
+						{ "name": "Survive", "color": "#7B8D93", "description": "Polites falls; the fight begins.", "children": [] },
+						{ "name": "Remember Them", "color": "#7B8D93", "description": "The blinding and the boast.", "children": [] },
+						{ "name": "My Goodbye", "color": "#7B8D93", "description": "Athena leaves Odysseus.", "children": [] }
+					]
+				},
+				{
+					"name": "Act 1: The Ocean Saga",
+					"color": "#D0021B",
+					"description": "Storms and Poseidon's wrath.",
+					"children": [
+						{ "name": "Storm", "color": "#417505", "description": "Aeolus gives the wind bag.", "children": [] },
+						{ "name": "Luck Runs Out", "color": "#417505", "description": "Crew tensions rise.", "children": [] },
+						{ "name": "Ruthlessness", "color": "#417505", "description": "Poseidon strikes back.", "children": [] }
+					]
+				},
+				{
+					"name": "Act 1: The Circe Saga",
+					"color": "#D0021B",
+					"description": "The Witch of Aiaia.",
+					"children": [
+						{ "name": "Puppeteer", "color": "#BD10E0", "description": "Men turned to pigs.", "children": [] },
+						{ "name": "Wouldn't You Like", "color": "#BD10E0", "description": "Hermes aids Odysseus.", "children": [] },
+						{ "name": "Done For", "color": "#BD10E0", "description": "Confronting Circe.", "children": [] },
+						{ "name": "There Are Other Ways", "color": "#BD10E0", "description": "Prophecy of the Underworld.", "children": [] }
+					]
+				},
+				{
+					"name": "Act 1: The Underworld Saga",
+					"color": "#D0021B",
+					"description": "The Land of the Dead.",
+					"children": [
+						{ "name": "The Underworld", "color": "#000000", "description": "Entering Hades.", "children": [] },
+						{ "name": "No Longer You", "color": "#000000", "description": "Tiresias's prophecy.", "children": [] },
+						{ "name": "Monster", "color": "#000000", "description": "Odysseus embraces ruthlessness.", "children": [] }
+					]
+				}
+			]
+		},
+		{
+			"name": "Hades (Game)",
+			"color": "#B4182D",
+			"description": "Lore from Supergiant's Hades.",
+			"children": [
+				{
+					"name": "Zagreus",
+					"color": "#5C1212",
+					"description": "Prince of the Underworld. Son of Hades and Persephone. Seeks to escape to find his mother.",
+					"children": []
+				},
+				{
+					"name": "Key Characters",
+					"color": "#5C1212",
+					"description": "Important figures in Zagreus's life.",
+					"children": [
+						{ "name": "Hades", "color": "#3E0A0A", "description": "The stern father and final boss.", "children": [] },
+						{ "name": "Nyx", "color": "#3E0A0A", "description": "Adoptive mother and Night Incarnate.", "children": [] },
+						{ "name": "Persephone", "color": "#3E0A0A", "description": "Birth mother living on the surface.", "children": [] }
+					]
+				},
+				{
+					"name": "Locations",
+					"color": "#5C1212",
+					"description": "Realms of the Underworld.",
+					"children": [
+						{ "name": "Tartarus", "color": "#2C3E50", "description": "The depths.", "children": [] },
+						{ "name": "Asphodel", "color": "#E74C3C", "description": "The magma meadows.", "children": [] },
+						{ "name": "Elysium", "color": "#27AE60", "description": "The paradise of heroes.", "children": [] }
+					]
+				}
+			]
+		},
+		{
+			"name": "Circe (Book)",
+			"color": "#F8E71C",
+			"description": "Based on Madeline Miller's novel.",
+			"children": [
+				{ "name": "Exile", "color": "#F5A623", "description": "Banished to Aiaia for using Pharmakeia.", "children": [] },
+				{ "name": "Witchcraft", "color": "#F5A623", "description": "Mastering herbs and transformation.", "children": [] },
+				{ "name": "Odysseus", "color": "#F5A623", "description": "Lover and father of Telegonus.", "children": [] },
+				{ "name": "Telegonus", "color": "#F5A623", "description": "Son who tragically kills Odysseus.", "children": [] }
+			]
+		}
+	]
+}

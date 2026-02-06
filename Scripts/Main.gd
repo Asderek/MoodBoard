@@ -27,6 +27,12 @@ var ui_layer = null
 var current_dragging_node = null
 var hovered_reparent_node = null
 
+var clipboard_node_data = {} # Clipboard storage
+
+# Input Handling
+var is_right_mouse_down = false
+var right_mouse_down_time = 0
+
 enum LayoutMode { FREE, TIMELINE }
 var current_layout_mode = LayoutMode.FREE
 
@@ -182,16 +188,43 @@ func add_new_node_from_file(path: String, pos: Vector3):
 
 func _unhandled_input(event):
 	if event is InputEventKey:
-		if event.pressed and event.keycode == KEY_V:
-			if event.ctrl_pressed or event.command_or_control_autoremap:
-				_handle_paste()
+		if event.pressed:
+			# CTRL+V -> PASTE
+			if event.keycode == KEY_V and (event.ctrl_pressed or event.command_or_control_autoremap):
+				if not clipboard_node_data.is_empty():
+					_handle_paste_from_clipboard() # Use Node Paste
+				else:
+					_handle_paste() # Use Image Paste (System Clipboard)
+				get_viewport().set_input_as_handled()
+				
+			# CTRL+C -> COPY
+			elif event.keycode == KEY_C and (event.ctrl_pressed or event.command_or_control_autoremap):
+				_handle_copy_command()
 				get_viewport().set_input_as_handled()
 				
 	if event is InputEventMouseButton:
-		if event.pressed:
-			# PRESS EVENTS
+		# RELEASE EVENTS
+		if not event.pressed:
 			if event.button_index == MOUSE_BUTTON_RIGHT:
-				_go_up_layer()
+				is_right_mouse_down = false
+				if ui_layer: ui_layer.hide_hold_indicator()
+		
+		# PRESS EVENTS
+		if event.pressed:
+			if event.button_index == MOUSE_BUTTON_RIGHT:
+				if event.double_click: 
+					# Double Right Click -> PASTE NODE
+					if not clipboard_node_data.is_empty():
+						_handle_paste_from_clipboard()
+						
+					# Cancel hold timer if double click happens
+					is_right_mouse_down = false 
+					if ui_layer: ui_layer.hide_hold_indicator() 
+				else:
+					# Start Hold Timer
+					is_right_mouse_down = true
+					right_mouse_down_time = Time.get_ticks_msec()
+					
 			elif event.button_index == MOUSE_BUTTON_LEFT:
 				if event.double_click:
 					# Double Click on "Nothing" -> Create New Node
@@ -220,11 +253,29 @@ func _unhandled_input(event):
 							
 				else:
 					# Single Click on "Nothing"
-					if ui_layer:
-						ui_layer.close_sidebar()
+					# Only close sidebar if we are strictly clicking on empty space.
+					# Note: If catching _unhandled_input, it implies we missed all nodes.
+					# But to be safe against race conditions or input propagation quirks:
 					
-					if Time.get_ticks_msec() - last_selection_time > 150:
+					var time_since_selection = Time.get_ticks_msec() - last_selection_time
+					
+					# Only close if we haven't selected something very recently (buffer)
+					# And also run our clear selection logic
+					if time_since_selection > 150:
+						if ui_layer:
+							ui_layer.close_sidebar()
 						clear_selection()
+
+func _handle_copy_command():
+	if selected_nodes.is_empty(): return
+	
+	# Copy the last selected node (or primary one)
+	var node = selected_nodes.back()
+	if is_instance_valid(node):
+		clipboard_node_data = node.node_data.duplicate(true)
+		print("Copied via Shortcut: ", clipboard_node_data.get("name"))
+		if ui_layer and ui_layer.has_method("show_toast"):
+			ui_layer.show_toast("Node Copied!")
 
 func _handle_paste():
 	if DisplayServer.clipboard_has_image():
@@ -334,6 +385,22 @@ func _process(_delta):
 	# Continuous Drag Check
 	if current_dragging_node and is_instance_valid(current_dragging_node):
 		_update_drag_hover()
+		
+	# Check Right Click Hold (Go Back)
+	if is_right_mouse_down:
+		var elapsed = Time.get_ticks_msec() - right_mouse_down_time
+		var progress = float(elapsed) / 600.0
+		
+		# Update Visuals
+		if ui_layer:
+			ui_layer.update_hold_indicator(get_viewport().get_mouse_position(), progress)
+			
+		if elapsed > 600: # 600ms threshold for "Hold"
+			_go_up_layer()
+			is_right_mouse_down = false # Reset to prevent multiple triggers
+			if ui_layer: ui_layer.hide_hold_indicator()
+
+
 
 func _update_drag_hover():
 	var dragging_pos = current_dragging_node.position
@@ -449,10 +516,12 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		var n = MoodNodeScene.instantiate()
 		node_root.add_child(n)
 		n.setup(data)
+
 		n.connect("node_entered", _on_node_entered)
 		n.connect("node_selected", _on_node_selected)
 		n.connect("node_drag_started", _on_node_drag_started)
 		n.connect("node_drag_ended", _on_node_drag_ended)
+		n.connect("node_right_clicked", _on_node_right_clicked)
 		
 		n.position = target_pos
 		
@@ -590,9 +659,11 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 var last_selection_time = 0
 
 func _on_node_selected(node, _is_multi):
+	print("Main: Node Selected! Name: ", node.node_data.get("name"), " | DeleteMode: ", is_delete_mode)
 	last_selection_time = Time.get_ticks_msec()
 	
 	if is_delete_mode:
+		print("Main: Toggling mark on node")
 		# Toggle "Marked" status
 		if node in nodes_marked_for_deletion:
 			node.set_marked_for_deletion(false)
@@ -607,6 +678,7 @@ func _on_node_selected(node, _is_multi):
 		return
 
 	# Standard Selection Logic (Only if not in delete mode)
+	print("Main: Standard Selection")
 	clear_selection()
 	node.set_selected(true)
 	selected_nodes.append(node)
@@ -615,6 +687,7 @@ func _on_node_selected(node, _is_multi):
 		ui_layer.show_sidebar(node.node_data, node)
 
 func _on_delete_mode_toggled(active: bool):
+	print("Main: Delete Mode Toggled. Active: ", active)
 	if active:
 		if is_delete_mode and not nodes_marked_for_deletion.is_empty():
 			# If already active and has items -> This is CONFIRM
@@ -735,6 +808,50 @@ func _on_node_drag_ended(node):
 			save_data()
 		elif current_layout_mode == LayoutMode.TIMELINE:
 			_handle_timeline_drop(node)
+
+func _on_node_right_clicked(node):
+	if node and is_instance_valid(node):
+		clipboard_node_data = node.node_data.duplicate(true) # Deep Copy
+		print("Node Copied: ", clipboard_node_data.get("name"))
+		
+		# Show Toast
+		if ui_layer and ui_layer.has_method("show_toast"):
+			ui_layer.show_toast("Node Copied! Double Right Click or Ctrl+V to Paste")
+
+func _handle_paste_from_clipboard():
+	if clipboard_node_data.is_empty(): return
+	
+	print("Pasting Node...")
+	
+	# Determine Position (Mouse)
+	var mouse_pos = get_viewport().get_mouse_position()
+	var plane = Plane(Vector3.BACK, 0)
+	var from = camera.project_ray_origin(mouse_pos)
+	var dir = camera.project_ray_normal(mouse_pos)
+	var world_pos = plane.intersects_ray(from, dir)
+	
+	if not world_pos: return
+	
+	# Create New Entry
+	var new_data = clipboard_node_data.duplicate(true)
+	
+	# Update Position
+	new_data["pos_x"] = world_pos.x
+	new_data["pos_y"] = world_pos.y
+	
+	# Update Creation Time (Unique ID factor)
+	new_data["created_at"] = Time.get_unix_time_from_system()
+	
+	# Offset name slightly?
+	new_data["name"] = new_data["name"] + " (Copy)"
+	
+	if current_view_data.has("children"):
+		current_view_data["children"].append(new_data)
+		_spawn_layer(current_view_data, Vector3.ZERO)
+		save_data()
+		
+		if ui_layer and ui_layer.has_method("show_toast"):
+			ui_layer.show_toast("Node Pasted!")
 
 func _check_reparent_drop(dropped_node) -> bool:
 	var drop_pos = dropped_node.global_position # Use global for safety against local offsets
