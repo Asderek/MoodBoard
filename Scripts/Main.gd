@@ -267,6 +267,10 @@ func _setup_environment():
 	mat.set_shader_parameter("bg_texture", tex)
 	
 	plate.material_override = mat
+	
+	# Debug/Info for user:
+	if ui_layer and ui_layer.has_method("show_toast"):
+		ui_layer.show_toast("Loaded background: " + texture_path)
 
 func get_available_backgrounds() -> Array:
 	var files = []
