@@ -5,7 +5,7 @@
 		{
 			"name": "Click Me",
 			"color": "#4B0082",
-			"description": "Welcome to Mood Board.\n\ncontrols:\n- Left Click: Enter Node\n- Right Click: Go Back\n- Middle Mouse Drag: Pan Camera\n\nThis is the default view. If you had a save file, it was loaded instead.",
+			"description": "Welcome to Mood Board.\n\ncontrols:\n- Double Click: Enter Node\n- Right Click (Hold 1s): Go Back\n- Middle Mouse Drag: Pan Camera\n- CTRL+C: Copy Node\n- CTRL+V (or Double Right Click): Paste Node\n\nThis is the default view. If you had a save file, it was loaded instead.",
 			"children": [
 				{
 					"name": "Introduction",
