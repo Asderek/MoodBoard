@@ -83,9 +83,14 @@ func _setup_settings_panel():
 	
 	# Add to center of screen
 	add_child(settings_panel)
+	
+	# To actually center it dynamically regardless of screen size:
 	settings_panel.anchors_preset = Control.PRESET_CENTER
-	# Force update layout
-	settings_panel.set_anchors_preset(Control.PRESET_CENTER)
+	settings_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	settings_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	
+	# If that fails to update immediately, we can also manually center the rect once:
+	settings_panel.position = (get_viewport_rect().size / 2.0) - (settings_panel.custom_minimum_size / 2.0)
 	
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
