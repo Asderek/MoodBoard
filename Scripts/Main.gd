@@ -196,7 +196,7 @@ func _setup_environment():
 		texture_path = Global.selected_background
 	else:
 		# Fallback Search
-		var potential_paths = ["res://backgrounds/stars.jpg", "res://backgrounds/universe.png", "res://backgrounds/universe.jpg", "res://stars.jpg", "res://universe.png"]
+		var potential_paths = ["res://backgrounds/teste.jpg", "res://backgrounds/stars.jpg", "res://backgrounds/universe.png", "res://backgrounds/universe.jpg", "res://stars.jpg", "res://universe.png"]
 		
 		for path in potential_paths:
 			if ResourceLoader.exists(path) or FileAccess.file_exists(ProjectSettings.globalize_path(path)):
