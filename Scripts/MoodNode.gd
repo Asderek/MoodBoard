@@ -7,6 +7,7 @@ signal node_hovered(node)
 signal node_unhovered(node)
 signal node_drag_started(node)
 signal node_drag_ended(node)
+signal node_position_changed(node, delta_pos)
 
 signal node_right_clicked(node)
 
@@ -21,6 +22,7 @@ func _on_input_event(_camera, event, _position, _normal, _shape_idx):
 			if event.pressed:
 				is_pressed = true
 				press_time = Time.get_ticks_msec()
+				press_pos = get_viewport().get_mouse_position()
 				get_viewport().set_input_as_handled() 
 				if event.double_click:
 					emit_signal("node_entered", self)
@@ -64,10 +66,11 @@ var target_color: Color = Color.WHITE
 var original_scale: Vector3 = Vector3.ONE
 
 # Interaction State
-var is_dragging = false
-var is_pressed = false
+var is_dragging: bool = false
+var is_pressed: bool = false
 var press_time = 0
-@export var drag_threshold = 250 # 0.25s
+var press_pos = Vector2.ZERO
+var drag_threshold = 150 # ms
 var drag_plane = Plane(Vector3.BACK, 0)
 
 var is_selected: bool = false
@@ -401,11 +404,21 @@ func _process(_delta):
 		var intersection = drag_plane.intersects_ray(ray_origin, ray_normal)
 		
 		if intersection:
+			var prev_pos = position
 			position = intersection
+			var delta = position - prev_pos
+			if delta.length_squared() > 0.000001:
+				emit_signal("node_position_changed", self, delta)
 
 	# Check for drag start
 	if is_pressed and not is_dragging:
-		if Time.get_ticks_msec() - press_time > drag_threshold:
+		var time_drag = (Time.get_ticks_msec() - press_time > drag_threshold)
+		
+		# Motion Drag Check
+		var current_mouse_pos = get_viewport().get_mouse_position()
+		var motion_drag = current_mouse_pos.distance_to(press_pos) > 5.0 # 5 pixels threshold
+		
+		if time_drag or motion_drag:
 			is_dragging = true
 			emit_signal("node_drag_started", self)
 			# Visual feedback for drag start

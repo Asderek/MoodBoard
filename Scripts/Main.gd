@@ -26,6 +26,7 @@ const GRID_SPACING_Y = 2.5
 var ui_layer = null
 var current_dragging_node = null
 var hovered_reparent_node = null
+var potential_single_selection_node = null
 
 var clipboard_node_data = {} # Clipboard storage
 
@@ -41,27 +42,92 @@ var timeline_item_width = 3.0 # Changed to var for slider control
 
 var timeline_lines_mesh: MeshInstance3D = null
 
+# Selection State
+var is_box_selecting = false
+var box_selection_start = Vector2.ZERO
+
 func _input(event):
-	# Global Release Handler for Dragging
-	# Fixes issue where target node captures input, preventing release event on dragged node
+	# Global Release Handler for Dragging and Selection
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			# 1. Handle Drag Release
+			var was_dragging = false
 			if current_dragging_node and is_instance_valid(current_dragging_node):
 				var node = current_dragging_node
+				was_dragging = true
 				
 				# Force state update on node if it hasn't processed it yet
 				if node.get("is_dragging"):
 					node.is_dragging = false
 					node.emit_signal("node_drag_ended", node)
-					# Note: The signal connection calls _on_node_drag_ended, 
-					# which calls _check_reparent_drop. 
-					# BUT since we are handling it here, we might double-call if the node ALSO fired.
-					# Let's trust logic: 
-					# If node fired, is_dragging is false.
-					# If node didn't fire, is_dragging is true.
-					# So only if node.is_dragging, we fire.
-					# AND since we just emitted signal, Main's _on_node_drag_ended runs.
-					# So we don't need to call _check_reparent_drop explicitly here if signal works.
+			
+			# 2. Handle Box Selection Release
+			if is_box_selecting:
+				is_box_selecting = false
+				if ui_layer: ui_layer.hide_selection_box()
+				_commit_box_selection()
+				
+			# 3. Handle Delayed Single Selection (Click on Selected Node)
+			if not was_dragging and potential_single_selection_node and is_instance_valid(potential_single_selection_node):
+				# Race Condition Check: Did we move the mouse enough to be a drag, even if signal didn't fire?
+				var mouse_pos = get_viewport().get_mouse_position()
+				var press_pos = potential_single_selection_node.get("press_pos")
+				var dist = 0.0
+				if press_pos:
+					dist = mouse_pos.distance_to(press_pos)
+					
+				if dist > 5.0:
+					# It WAS a drag (fast or frame skipped). Cancel single select.
+					potential_single_selection_node = null
+				else:
+					# User clicked a selected node but DID NOT DRAG.
+					# This means they want to select ONLY this node now.
+					_select_single_node(potential_single_selection_node)
+				
+			# Reset potential
+			potential_single_selection_node = null
+
+	if event is InputEventMouseMotion:
+		if is_box_selecting:
+			# Guard: If we somehow started dragging a node, cancel box
+			if current_dragging_node:
+				is_box_selecting = false
+				if ui_layer: ui_layer.hide_selection_box()
+				return
+
+			var current_pos = get_viewport().get_mouse_position()
+			var rect = Rect2(box_selection_start, current_pos - box_selection_start).abs()
+			if ui_layer:
+				ui_layer.update_selection_box(rect)
+
+func _commit_box_selection():
+	var current_pos = get_viewport().get_mouse_position()
+	var selection_rect = Rect2(box_selection_start, current_pos - box_selection_start).abs()
+	
+	var is_additive = Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_SHIFT)
+	is_additive = is_additive or Input.is_physical_key_pressed(KEY_CTRL) or Input.is_physical_key_pressed(KEY_SHIFT)
+	
+	# Minimum size check to avoid accidental clears on tiny clicks (though click handler does that)
+	if selection_rect.size.length_squared() < 100: # 10x10 pixels approx
+		return
+
+	# Logic:
+	# If Shift/Ctrl held -> Add to selection
+	# Else -> Replace selection (Clear first)
+	
+	if not is_additive:
+		clear_selection()
+		
+	for child in node_root.get_children():
+		if not is_instance_valid(child): continue
+		# Project Node Position to Screen
+		var screen_pos = camera.unproject_position(child.position)
+		
+		# Check if inside rect & in front of camera
+		if selection_rect.has_point(screen_pos) and not camera.is_position_behind(child.position):
+			if not child in selected_nodes:
+				child.set_selected(true)
+				selected_nodes.append(child)
 
 
 
@@ -417,19 +483,39 @@ func _unhandled_input(event):
 							add_new_node()
 							
 				else:
-					# Single Click on "Nothing"
-					# Only close sidebar if we are strictly clicking on empty space.
-					# Note: If catching _unhandled_input, it implies we missed all nodes.
-					# But to be safe against race conditions or input propagation quirks:
+					# Single Click on "Nothing" -> Start Box Selection
+					# If we are here, it means we clicked on empty space (Nodes handle their own input)
 					
-					var time_since_selection = Time.get_ticks_msec() - last_selection_time
+					# Guard: Don't start box if we are dragging a node
+					if current_dragging_node:
+						return
+						
+					# Guard: Double check if we actually hit a node (Physics Raycast)
+					# Sometimes _unhandled_input fires even if we clicked a node (input propagation quirks)
+					var mouse_pos = get_viewport().get_mouse_position()
+					var from = camera.project_ray_origin(mouse_pos)
+					var to = from + camera.project_ray_normal(mouse_pos) * 1000.0
+					var space = get_world_3d().direct_space_state
+					var query = PhysicsRayQueryParameters3D.create(from, to)
+					query.collide_with_areas = true # MoodNodes are Areas
+					query.collide_with_bodies = true
 					
-					# Only close if we haven't selected something very recently (buffer)
-					# And also run our clear selection logic
-					if time_since_selection > 150:
-						if ui_layer:
-							ui_layer.close_sidebar()
+					var result = space.intersect_ray(query)
+					if result:
+						# If we hit something that is a MoodNode, ABORT background logic
+						var collider = result.collider
+						if collider is Area3D and collider.has_method("set_selected"): # Duck typing MoodNode
+							return
+
+					# Start Box Selection
+					is_box_selecting = true
+					box_selection_start = get_viewport().get_mouse_position()
+					
+					var is_additive = Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_SHIFT)
+					
+					if not is_additive:
 						clear_selection()
+						if ui_layer: ui_layer.close_sidebar()
 
 func _handle_copy_command():
 	if selected_nodes.is_empty(): return
@@ -602,7 +688,7 @@ func _update_drag_hover():
 
 func clear_selection():
 	if not selected_nodes.is_empty():
-		pass
+		pass # Debug removed
 	for node in selected_nodes:
 		if is_instance_valid(node):
 			node.set_selected(false)
@@ -681,16 +767,23 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 		node_root.add_child(n)
 		n.setup(data)
 
+
 		n.connect("node_entered", _on_node_entered)
 		n.connect("node_selected", _on_node_selected)
 		n.connect("node_drag_started", _on_node_drag_started)
 		n.connect("node_drag_ended", _on_node_drag_ended)
 		n.connect("node_right_clicked", _on_node_right_clicked)
+		# NEW: Multi-Drag Support
+		n.connect("node_position_changed", _on_node_position_changed)
 		
 		n.position = target_pos
 		
 		# Entry Animation (Same logic as before)
 		# Entry Animation (Same logic as before)
+
+# ... (omitted)
+
+
 		var s_val = float(data.get("scale", 1.0))
 		var target_scale = Vector3(s_val, s_val, s_val)
 		
@@ -822,7 +915,7 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 
 var last_selection_time = 0
 
-func _on_node_selected(node, _is_multi):
+func _on_node_selected(node, is_multi):
 	last_selection_time = Time.get_ticks_msec()
 	
 	if is_delete_mode:
@@ -840,12 +933,32 @@ func _on_node_selected(node, _is_multi):
 		return
 
 	# Standard Selection Logic (Only if not in delete mode)
-	clear_selection()
-	node.set_selected(true)
-	selected_nodes.append(node)
-		
-	if ui_layer:
-		ui_layer.show_sidebar(node.node_data, node)
+	if is_multi:
+		if node in selected_nodes:
+			node.set_selected(false)
+			selected_nodes.erase(node)
+		else:
+			node.set_selected(true)
+			selected_nodes.append(node)
+	else:
+		# No modifier.
+		# If node ALREADY selected, DON'T clear yet. Wait for drag.
+		if node in selected_nodes:
+			print("Node IS in selection. Delaying clear. Setting potential: ", node.name)
+			potential_single_selection_node = node
+		else:
+			# Valid new single selection
+			print("Node NOT in selection. Clearing immediately.")
+			clear_selection()
+			node.set_selected(true)
+			selected_nodes.append(node)
+			
+	if not selected_nodes.is_empty():
+		if ui_layer:
+			ui_layer.show_sidebar(node.node_data, node)
+	else:
+		if ui_layer:
+			ui_layer.close_sidebar()
 
 func _on_delete_mode_toggled(active: bool):
 	if active:
@@ -905,9 +1018,15 @@ func _on_node_drag_started(node):
 		clear_selection()
 		node.set_selected(true)
 		selected_nodes.append(node)
+	else:
+		pass
+		
+	# Cancel pending single click logic if we started dragging
+	potential_single_selection_node = null
 		
 	if ui_layer:
 		ui_layer.set_bin_visible(true)
+		ui_layer.close_sidebar()
 		
 	current_dragging_node = node # Start tracking
 
@@ -1468,3 +1587,28 @@ func _on_align_grid_requested():
 		
 	_spawn_layer(current_view_data, Vector3.ZERO)
 	save_data()
+
+func _on_node_position_changed(node, delta):
+	# Move all OTHER selected nodes
+	if selected_nodes.size() <= 1: return
+	
+	if node in selected_nodes:
+		for other in selected_nodes:
+			if other != node and is_instance_valid(other):
+				other.position += delta
+				
+				# Update Internal Data for Persistence
+				if other.node_data:
+					other.node_data["pos_x"] = other.position.x
+					other.node_data["pos_y"] = other.position.y
+
+
+
+func _select_single_node(node):
+	print("_select_single_node EXECUTION for: ", node.name)
+	clear_selection()
+	node.set_selected(true)
+	selected_nodes.append(node)
+	
+	if ui_layer:
+		ui_layer.show_sidebar(node.node_data, node)

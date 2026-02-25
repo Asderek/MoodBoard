@@ -704,3 +704,48 @@ func show_toast(message: String, duration: float = 3.0):
 	
 	# 3. Fade Out
 	toast_tween.tween_property(toast_label, "modulate:a", 0.0, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+# --- MULTI-SELECT BOX ---
+var selection_box: Panel = null
+
+func _setup_selection_box():
+	selection_box = Panel.new()
+	selection_box.name = "SelectionBox"
+	
+	# Style: Semi-transparent fill with border
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.2, 0.4, 0.8, 0.2) # Light Blue, Transparent
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.4, 0.6, 1.0, 0.8) # Brighter Blue Border
+	style.corner_radius_top_left = 2
+	style.corner_radius_top_right = 2
+	style.corner_radius_bottom_left = 2
+	style.corner_radius_bottom_right = 2
+	
+	selection_box.add_theme_stylebox_override("panel", style)
+	selection_box.mouse_filter = Control.MOUSE_FILTER_IGNORE # Important!
+	selection_box.visible = false
+	
+	# Add to ForegroundLayer (or a new layer below Sidebar?)
+	# ForegroundLayer contains Sidebar which should be on top.
+	# Let's add it as the first child of ForegroundLayer so it is behind Sidebar/Buttons?
+	# Or just add to self (UI root) but `ForegroundLayer` is full rect?
+	# UI root is Control. Main -> UI.
+	# Let's check `UI.tscn` structure from code implicitly: `$ForegroundLayer` exists.
+	# We can add it to `$ForegroundLayer` at index 0.
+	$ForegroundLayer.add_child(selection_box)
+	$ForegroundLayer.move_child(selection_box, 0)
+
+func update_selection_box(rect: Rect2):
+	if not selection_box: _setup_selection_box()
+	
+	selection_box.visible = true
+	selection_box.position = rect.position
+	selection_box.size = rect.size
+
+func hide_selection_box():
+	if selection_box:
+		selection_box.visible = false
