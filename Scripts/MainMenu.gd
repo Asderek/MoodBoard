@@ -77,7 +77,7 @@ var settings_panel: Panel = null
 var bg_option_btn: OptionButton = null
 
 func _setup_settings_panel():
-	settings_panel = Panel.new()
+	settings_panel = PanelContainer.new()
 	settings_panel.visible = false
 	settings_panel.custom_minimum_size = Vector2(300, 400)
 	
@@ -113,14 +113,8 @@ func _setup_settings_panel():
 	# If that fails to update immediately, we can also manually center the rect once:
 	settings_panel.position = (get_viewport_rect().size / 2.0) - (settings_panel.custom_minimum_size / 2.0)
 	
-	var margin_container = MarginContainer.new()
-	margin_container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
-		margin_container.add_theme_constant_override(side, 20)
-	settings_panel.add_child(margin_container)
-	
 	var vbox = VBoxContainer.new()
-	margin_container.add_child(vbox)
+	settings_panel.add_child(vbox)
 	
 	# Title
 	var lbl = Label.new()
