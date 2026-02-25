@@ -73,7 +73,7 @@ func _ready():
 	_setup_settings_panel()
 
 # --- SETTINGS LOGIC ---
-var settings_panel: Panel = null
+var settings_panel: PanelContainer = null
 var bg_option_btn: OptionButton = null
 
 func _setup_settings_panel():
