@@ -84,6 +84,20 @@ func _setup_settings_panel():
 	# Add to center of screen
 	add_child(settings_panel)
 	
+	# Add a solid background so it doesn't blend with the menu text
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.15, 0.15, 0.15, 1.0) # Solid dark gray
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.3, 0.3, 0.3, 1.0)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	settings_panel.add_theme_stylebox_override("panel", style)
+	
 	# To actually center it dynamically regardless of screen size:
 	settings_panel.anchors_preset = Control.PRESET_CENTER
 	settings_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
