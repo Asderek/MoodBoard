@@ -96,6 +96,13 @@ func _setup_settings_panel():
 	style.corner_radius_top_right = 8
 	style.corner_radius_bottom_left = 8
 	style.corner_radius_bottom_right = 8
+	
+	# Add Padding (Content Margin)
+	style.content_margin_left = 20
+	style.content_margin_top = 20
+	style.content_margin_right = 20
+	style.content_margin_bottom = 20
+	
 	settings_panel.add_theme_stylebox_override("panel", style)
 	
 	# To actually center it dynamically regardless of screen size:
