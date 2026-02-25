@@ -113,12 +113,14 @@ func _setup_settings_panel():
 	# If that fails to update immediately, we can also manually center the rect once:
 	settings_panel.position = (get_viewport_rect().size / 2.0) - (settings_panel.custom_minimum_size / 2.0)
 	
-	var vbox = VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# Margins
+	var margin_container = MarginContainer.new()
+	margin_container.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
-		vbox.add_theme_constant_override(side, 20)
-	settings_panel.add_child(vbox)
+		margin_container.add_theme_constant_override(side, 20)
+	settings_panel.add_child(margin_container)
+	
+	var vbox = VBoxContainer.new()
+	margin_container.add_child(vbox)
 	
 	# Title
 	var lbl = Label.new()
