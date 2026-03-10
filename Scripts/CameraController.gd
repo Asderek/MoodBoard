@@ -1,92 +1,179 @@
 extends Camera3D
 
-var tween: Tween
-var current_focus_point: Vector3 = Vector3.ZERO
 var default_distance: float = 12.0
 
+# FPS Movement
+var move_speed: float = 10.0
+var mouse_sensitivity: float = 0.003
+var pitch: float = 0.0
+var yaw: float = 0.0
 
-signal panned(relative)
+# Grabbing System
+var grabbed_node: Node3D = null
+var grab_distance: float = 4.0
 
 func _ready():
-	# Set initial position
 	position = Vector3(0, 0, default_distance)
-
-func focus_on(target_pos: Vector3, zoom_in: bool = false):
-	if tween:
-		tween.kill()
-	tween = create_tween()
-	
-	var target_z = 5.0 if zoom_in else default_distance
-	var new_pos = Vector3(target_pos.x, target_pos.y, target_pos.z + target_z)
-	
-	tween.set_parallel(true)
-	tween.tween_property(self, "position", new_pos, 1.0).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "rotation", Vector3.ZERO, 1.0) 
-
-func zoom_into(target_pos: Vector3, completion_callback: Callable):
-	if tween:
-		tween.kill()
-	tween = create_tween()
-	
-	# Zoom strictly into the target
-	var zoom_pos = Vector3(target_pos.x, target_pos.y, target_pos.z + 1.0)
-	
-	tween.tween_property(self, "position", zoom_pos, 0.8).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
-	tween.tween_callback(completion_callback)
-
-var is_dragging = false
-# Base sensitivity factor. 
-# 0.001 is a rough starting point for "World Units / (Pixel * Depth)"
-# You might need to tweak this.
-var pan_base_sensitivity = 0.002 
-var zoom_sensitivity = 0.1
-var min_zoom = 2.0
-var max_zoom = 50.0
-var can_zoom : bool = true
-
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func _unhandled_input(event):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_MIDDLE:
-			is_dragging = event.pressed
-		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			if can_zoom:
-				_handle_zoom(event.position, -1) # Zoom In
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			if can_zoom:
-				_handle_zoom(event.position, 1)  # Zoom Out
+	# Escape to return to menu
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		var main_script = get_node("/root/Main")
+		if main_script == null:
+			main_script = get_parent()
+			
+		if main_script and main_script.has_method("return_to_menu"):
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+			get_viewport().set_input_as_handled()
+			main_script.return_to_menu()
+			return
 	
-	if event is InputEventMouseMotion and is_dragging:
-		# Panning: Move Camera Opposite to Drag
-		# Scale by depth (position.z) so it feels 1:1 with mouse
-		var speed = position.z * pan_base_sensitivity
-		position.x -= event.relative.x * speed
-		position.y += event.relative.y * speed
+	# Recapture mouse on click or handle double click
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+			get_viewport().set_input_as_handled()
+			return
+		elif event.double_click and grabbed_node == null:
+			# Double click while captured: try to enter node
+			var space_state = get_world_3d().direct_space_state
+			var query = PhysicsRayQueryParameters3D.create(global_position, global_position - global_transform.basis.z * 100.0)
+			query.collide_with_areas = true
+			query.collide_with_bodies = true
+			
+			var result = space_state.intersect_ray(query)
+			if result:
+				var collider = result.collider
+				if collider.has_method("set_selected"):
+					collider.emit_signal("node_entered", collider)
+					get_viewport().set_input_as_handled()
+					return
+					
+	# Right Click to Go Back
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		var main_script = get_node("/root/Main") # or get_parent() depending on scene tree
+		if main_script == null:
+			main_script = get_parent()
+			
+		if event.pressed:
+			if main_script and main_script.has_method("_go_up_layer"):
+				main_script.is_right_mouse_down = true
+				main_script.right_mouse_down_time = Time.get_ticks_msec()
+		else:
+			if main_script and main_script.has_method("_go_up_layer"):
+				main_script.is_right_mouse_down = false
+				if main_script.ui_layer:
+					main_script.ui_layer.hide_hold_indicator()
+					
+	# Mouse Wheel to move nodes closer/further
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			var scroll_dir = 1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0 # UP = Further, DOWN = Closer
+			var scroll_speed = 2.0
+			var delta_z = scroll_dir * scroll_speed
+			
+			if grabbed_node:
+				# Adjust grab distance for the currently held node
+				grab_distance = clamp(grab_distance + delta_z, 2.0, 50.0)
+				get_viewport().set_input_as_handled()
+			else:
+				# Try to push/pull selected nodes
+				var main_script = get_node("/root/Main")
+				if main_script == null: main_script = get_parent()
+				
+				if main_script and main_script.get("selected_nodes") and main_script.selected_nodes.size() > 0:
+					var forward = -global_transform.basis.z.normalized()
+					var move_vec = forward * delta_z
+					
+					for node in main_script.selected_nodes:
+						if is_instance_valid(node):
+							node.position += move_vec
+							# Auto-save visually but wait for drop or explicit save for file writing
+							if node.node_data:
+								node.node_data["pos_x"] = node.position.x
+								node.node_data["pos_y"] = node.position.y
+								node.node_data["pos_z"] = node.position.z
+								
+					# Might want to call save_data if continuous saving is required, 
+					# or let the user explicitly save. We'll let it auto-save when requested.
+					get_viewport().set_input_as_handled()
+			
+	# 'E' to Grab / Drop
+	if event is InputEventKey and event.pressed and event.keycode == KEY_E:
+		_toggle_grab()
 
-func _handle_zoom(mouse_pos: Vector2, direction: int):
-	# Direction: -1 (In), 1 (Out)
-	
-	# 1. Calculate World Point under Mouse (assume Z=0 plane)
-	var plane = Plane(Vector3.BACK, 0) # Normal (0,0,1), dist 0
-	var ray_origin = project_ray_origin(mouse_pos)
-	var ray_normal = project_ray_normal(mouse_pos)
-	var intersection = plane.intersects_ray(ray_origin, ray_normal)
-	
-	if intersection == null:
-		return # Mouse pointing at nothing/infinite
+	if event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+		yaw -= event.relative.x * mouse_sensitivity
+		pitch -= event.relative.y * mouse_sensitivity
+		pitch = clamp(pitch, -deg_to_rad(89), deg_to_rad(89))
 		
-	# 2. Calculate New Camera Position
-	# We want to move the Camera along the line connecting [CameraPos] and [Intersection]
-	# To "Zoom In", we move Camera TOWARDS Intersection.
-	# To "Zoom Out", we move Camera AWAY from Intersection.
-	
-	var zoom_factor = 1.1 if direction > 0 else 0.9
-	
-	# Check Limits based on Z height
-	var new_z = position.z * zoom_factor
-	if new_z < min_zoom or new_z > max_zoom:
-		return
+		rotation.y = yaw
+		rotation.x = pitch
+
+func _process(delta):
+	# Movement
+	if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+		var input_dir = Vector3.ZERO
+		if Input.is_physical_key_pressed(KEY_W): input_dir.z -= 1
+		if Input.is_physical_key_pressed(KEY_S): input_dir.z += 1
+		if Input.is_physical_key_pressed(KEY_A): input_dir.x -= 1
+		if Input.is_physical_key_pressed(KEY_D): input_dir.x += 1
+		if Input.is_physical_key_pressed(KEY_CTRL): input_dir.y -= 1
+		if Input.is_physical_key_pressed(KEY_SPACE) or Input.is_physical_key_pressed(KEY_E): # Wait, E is interact, use SPACE or R for up?
+			pass
+		if Input.is_physical_key_pressed(KEY_SPACE): input_dir.y += 1
 		
-	# Interpolate current position towards target intersection
-	# NewPos = Target + (Current - Target) * Factor
-	position = intersection + (position - intersection) * zoom_factor
+		# Normalize to prevent faster diagonal movement
+		input_dir = input_dir.normalized()
+		
+		# Move relative to looking direction
+		var forward = -global_transform.basis.z.normalized()
+		var right = global_transform.basis.x.normalized()
+		var up = Vector3.UP
+		
+		# Keep forward and right flat on XZ plane if you want standard FPS movement,
+		# or allow flying if you want 6DOF. Let's do 6DOF (flying) since it's a moodboard.
+		var move_dir = (right * input_dir.x) + (global_transform.basis.y.normalized() * input_dir.y) + (forward * -input_dir.z)
+		position += move_dir * move_speed * delta
+
+	# Update grabbed node position
+	if grabbed_node and is_instance_valid(grabbed_node):
+		var target_pos = global_position - global_transform.basis.z * grab_distance
+		# Smooth interpolation
+		grabbed_node.global_position = grabbed_node.global_position.lerp(target_pos, 15.0 * delta)
+		
+		# Update node's internal position data so it saves correctly
+		grabbed_node.node_data["pos_x"] = grabbed_node.global_position.x
+		grabbed_node.node_data["pos_y"] = grabbed_node.global_position.y
+		# Wait, 3D nodes should save Z as well? MoodBoard was 2D. 
+		# If we save Z, we need to ensure nodes have a pos_z.
+		if not grabbed_node.node_data.has("pos_z"):
+			grabbed_node.node_data["pos_z"] = 0.0
+		grabbed_node.node_data["pos_z"] = grabbed_node.global_position.z
+
+func _toggle_grab():
+	if grabbed_node:
+		# Drop it
+		grabbed_node = null
+	else:
+		# Attempt to grab
+		var space_state = get_world_3d().direct_space_state
+		var query = PhysicsRayQueryParameters3D.create(global_position, global_position - global_transform.basis.z * 100.0)
+		query.collide_with_areas = true
+		query.collide_with_bodies = true
+		
+		var result = space_state.intersect_ray(query)
+		if result:
+			var collider = result.collider
+			# Check if it's a MoodNode by duck typing
+			if collider.has_method("set_selected"):
+				grabbed_node = collider
+				# Calculate grab distance based on how far it currently is, clamped between 2 and 10
+				grab_distance = clamp(global_position.distance_to(grabbed_node.global_position), 2.0, 10.0)
+
+# Dummy methods to prevent crash if other scripts call them
+func focus_on(target_pos: Vector3, zoom_in: bool = false):
+	pass
+func zoom_into(target_pos: Vector3, completion_callback: Callable):
+	pass

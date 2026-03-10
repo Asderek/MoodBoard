@@ -31,6 +31,7 @@ func _on_input_event(_camera, event, _position, _normal, _shape_idx):
 				# Released
 				if is_dragging:
 					is_dragging = false
+					set_selected(is_selected) # Refresh glow state
 					emit_signal("node_drag_ended", self)
 					var tween = create_tween()
 					tween.tween_property(self, "scale", original_scale * 1.05, 0.1)
@@ -170,7 +171,7 @@ func _update_outline_mesh():
 		if visual_mesh.mesh is BoxMesh:
 			mesh.size = visual_mesh.mesh.size
 		else:
-			mesh.size = Vector3(2.0, 2.0, 0.2) # Fallback default
+			mesh.size = Vector3(2.0, 2.0, 0.6) # Updated Fallback
 			
 		outline_mesh.mesh = mesh
 		
@@ -352,8 +353,12 @@ func set_selected(selected: bool):
 		var show_bg = node_data.get("use_bg_color", true)
 		selection_mesh.visible = is_selected and show_bg
 		
+		# Apply glow if dragging
+		var glow_energy = 5.0 if is_dragging else 1.0
 		selection_mesh.material_override.albedo_color = Color.WHITE
+		selection_mesh.material_override.emission_enabled = true
 		selection_mesh.material_override.emission = Color.WHITE
+		selection_mesh.material_override.emission_energy_multiplier = glow_energy
 
 func set_label_opacity(alpha: float):
 	label.modulate.a = alpha
@@ -420,20 +425,21 @@ func _process(_delta):
 		
 		if time_drag or motion_drag:
 			is_dragging = true
+			set_selected(is_selected) # Force refresh glow
 			emit_signal("node_drag_started", self)
 			# Visual feedback for drag start
 			var tween = create_tween()
-			tween.tween_property(self, "scale", original_scale * 0.9, 0.1)
+			tween.tween_property(self, "scale", original_scale * 0.85, 0.1) # 15% decrease
 
 func _on_mouse_entered():
 	emit_signal("node_hovered", self)
 	if not is_dragging and not is_pressed:
 		var tween = create_tween()
-		tween.tween_property(self, "scale", original_scale * 1.05, 0.1) # Reduced hover scale slightly
+		tween.tween_property(self, "scale", original_scale * 1.05, 0.1) # Hover scale
 
 func _on_mouse_exited():
 	emit_signal("node_unhovered", self)
-	if not is_pressed:
+	if not is_pressed and not is_dragging:
 		var tween = create_tween()
 		tween.tween_property(self, "scale", original_scale, 0.1)
 

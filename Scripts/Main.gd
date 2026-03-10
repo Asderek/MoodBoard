@@ -47,87 +47,10 @@ var is_box_selecting = false
 var box_selection_start = Vector2.ZERO
 
 func _input(event):
-	# Global Release Handler for Dragging and Selection
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-			# 1. Handle Drag Release
-			var was_dragging = false
-			if current_dragging_node and is_instance_valid(current_dragging_node):
-				var node = current_dragging_node
-				was_dragging = true
-				
-				# Force state update on node if it hasn't processed it yet
-				if node.get("is_dragging"):
-					node.is_dragging = false
-					node.emit_signal("node_drag_ended", node)
-			
-			# 2. Handle Box Selection Release
-			if is_box_selecting:
-				is_box_selecting = false
-				if ui_layer: ui_layer.hide_selection_box()
-				_commit_box_selection()
-				
-			# 3. Handle Delayed Single Selection (Click on Selected Node)
-			if not was_dragging and potential_single_selection_node and is_instance_valid(potential_single_selection_node):
-				# Race Condition Check: Did we move the mouse enough to be a drag, even if signal didn't fire?
-				var mouse_pos = get_viewport().get_mouse_position()
-				var press_pos = potential_single_selection_node.get("press_pos")
-				var dist = 0.0
-				if press_pos:
-					dist = mouse_pos.distance_to(press_pos)
-					
-				if dist > 5.0:
-					# It WAS a drag (fast or frame skipped). Cancel single select.
-					potential_single_selection_node = null
-				else:
-					# User clicked a selected node but DID NOT DRAG.
-					# This means they want to select ONLY this node now.
-					_select_single_node(potential_single_selection_node)
-				
-			# Reset potential
-			potential_single_selection_node = null
-
-	if event is InputEventMouseMotion:
-		if is_box_selecting:
-			# Guard: If we somehow started dragging a node, cancel box
-			if current_dragging_node:
-				is_box_selecting = false
-				if ui_layer: ui_layer.hide_selection_box()
-				return
-
-			var current_pos = get_viewport().get_mouse_position()
-			var rect = Rect2(box_selection_start, current_pos - box_selection_start).abs()
-			if ui_layer:
-				ui_layer.update_selection_box(rect)
+	pass
 
 func _commit_box_selection():
-	var current_pos = get_viewport().get_mouse_position()
-	var selection_rect = Rect2(box_selection_start, current_pos - box_selection_start).abs()
-	
-	var is_additive = Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_SHIFT)
-	is_additive = is_additive or Input.is_physical_key_pressed(KEY_CTRL) or Input.is_physical_key_pressed(KEY_SHIFT)
-	
-	# Minimum size check to avoid accidental clears on tiny clicks (though click handler does that)
-	if selection_rect.size.length_squared() < 100: # 10x10 pixels approx
-		return
-
-	# Logic:
-	# If Shift/Ctrl held -> Add to selection
-	# Else -> Replace selection (Clear first)
-	
-	if not is_additive:
-		clear_selection()
-		
-	for child in node_root.get_children():
-		if not is_instance_valid(child): continue
-		# Project Node Position to Screen
-		var screen_pos = camera.unproject_position(child.position)
-		
-		# Check if inside rect & in front of camera
-		if selection_rect.has_point(screen_pos) and not camera.is_position_behind(child.position):
-			if not child in selected_nodes:
-				child.set_selected(true)
-				selected_nodes.append(child)
+	pass
 
 
 
@@ -213,60 +136,37 @@ func _setup_environment():
 		
 	var tex = _load_texture_robust(texture_path)
 	
-	# 3. Create Background Plate
-	# Ensure we have reference to camera
-	if not camera:
-		camera = $Camera3D
+	# 3. Apply to WorldEnvironment Skybox
+	# Check if WorldEnvironment exists, if not create it
+	var env_node = get_node_or_null("WorldEnvironment")
+	if not env_node:
+		env_node = WorldEnvironment.new()
+		env_node.name = "WorldEnvironment"
+		add_child(env_node)
 		
-	var plate = MeshInstance3D.new()
-	plate.name = "BackgroundPlate"
-	plate.mesh = QuadMesh.new()
-	# Make it HUGE so it covers the frustum even at far distance
-	# Previous size (1000) was too small for 16:9 at Z=-500 (Needs ~1350)
-	plate.mesh.size = Vector2(10000, 10000)
-	
-	# Position: In front of camera, far away (Local Z -500)
-	# Main Camera creates frustum. Z=-500 should be safe behind everything.
-	plate.position = Vector3(0, 0, -500)
-	
-	camera.add_child(plate)
-	
-	# 4. Shader Material
-	# ... (Existing Shader Code) ...
-	var mat = ShaderMaterial.new()
-	var shader_code = """
-	shader_type spatial;
-	render_mode unshaded, cull_disabled; // No lighting, show back usage
-
-	uniform sampler2D bg_texture : source_color, filter_linear_mipmap;
-
-	void vertex() {
-		// No vertex manip needed
-	}
-
-	void fragment() {
-		vec2 tex_size = vec2(textureSize(bg_texture, 0));
-		float tex_aspect = tex_size.x / tex_size.y;
-		float screen_aspect = VIEWPORT_SIZE.x / VIEWPORT_SIZE.y;
+	var env = env_node.environment
+	if not env:
+		env = Environment.new()
+		env_node.environment = env
 		
-		vec2 scale = vec2(1.0);
+	# Setup Sky
+	var sky = env.sky
+	if not sky:
+		sky = Sky.new()
+		env.sky = sky
 		
-		if (screen_aspect > tex_aspect) {
-			scale.y = tex_aspect / screen_aspect;
-		} else {
-			scale.x = screen_aspect / tex_aspect;
-		}
+	var sky_mat = sky.sky_material
+	if not sky_mat is PanoramaSkyMaterial:
+		sky_mat = PanoramaSkyMaterial.new()
+		sky.sky_material = sky_mat
 		
-		vec2 final_uv = (SCREEN_UV - 0.5) * scale + 0.5;
-		ALBEDO = texture(bg_texture, final_uv).rgb;
-	}
-	"""
-	var shader = Shader.new()
-	shader.code = shader_code
-	mat.shader = shader
-	mat.set_shader_parameter("bg_texture", tex)
-	
-	plate.material_override = mat
+	sky_mat.panorama = tex
+	env.background_mode = Environment.BG_SKY
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.glow_enabled = true
+	env.glow_intensity = 1.5
+	env.glow_strength = 1.0
+	env.glow_bloom = 0.2
 
 func get_available_backgrounds() -> Array:
 	var files = []
@@ -289,18 +189,13 @@ func set_background_from_path(path: String):
 		print("Error: Could not load background texture: ", path)
 		return
 
-	# Find the plate (it's attached to the camera)
-	if not camera: camera = $Camera3D
-	var plate = camera.get_node_or_null("BackgroundPlate")
+	# Find the WorldEnvironment
+	var env_node = get_node_or_null("WorldEnvironment")
 	
-	if plate and plate.material_override:
-		plate.material_override.set_shader_parameter("bg_texture", tex)
+	if env_node and env_node.environment and env_node.environment.sky and env_node.environment.sky.sky_material is PanoramaSkyMaterial:
+		env_node.environment.sky.sky_material.panorama = tex
 	else:
-		# If plate doesn't exist yet (e.g. initial setup skipped), verify setup?
-		# But _setup_environment creates it.
-		# If we are calling this, environment should imply setup.
-		# Force restart environment setup if needed?
-		print("Warning: Background Plate not found, restarting environment setup...")
+		print("Warning: Skybox not found, restarting environment setup...")
 		_setup_environment() # This will reload everything, might be overkill but safe.
 
 func _load_texture_robust(path: String) -> Texture2D:
@@ -330,6 +225,14 @@ func save_data():
 	if Global.current_file_path == "":
 		print("Error: No save path defined")
 		return
+
+	# Explicitly grab positions of currently visible layer
+	if current_layout_mode == LayoutMode.FREE:
+		for child in node_root.get_children():
+			if is_instance_valid(child) and child.has_method("set_selected") and not child.is_in_group("header_node"):
+				child.node_data["pos_x"] = child.position.x
+				child.node_data["pos_y"] = child.position.y
+				child.node_data["pos_z"] = child.position.z
 
 	var file = FileAccess.open(Global.current_file_path, FileAccess.WRITE)
 	if file:
@@ -404,6 +307,7 @@ func add_new_node_from_file(path: String, pos: Vector3):
 		"timeline_index": 9999,
 		"pos_y": pos.y,
 		"pos_x": pos.x,
+		"pos_z": pos.z,
 		"file_path": path, # Store absolute path
 		"use_bg_color": false # Default to no background for images
 	}
@@ -433,89 +337,9 @@ func _unhandled_input(event):
 				_handle_copy_command()
 				get_viewport().set_input_as_handled()
 				
-	if event is InputEventMouseButton:
-		# RELEASE EVENTS
-		if not event.pressed:
-			if event.button_index == MOUSE_BUTTON_RIGHT:
-				is_right_mouse_down = false
-				if ui_layer: ui_layer.hide_hold_indicator()
-		
-		# PRESS EVENTS
-		if event.pressed:
-			if event.button_index == MOUSE_BUTTON_RIGHT:
-				if event.double_click: 
-					# Double Right Click -> PASTE NODE
-					if not clipboard_node_data.is_empty():
-						_handle_paste_from_clipboard()
-						
-					# Cancel hold timer if double click happens
-					is_right_mouse_down = false 
-					if ui_layer: ui_layer.hide_hold_indicator() 
-				else:
-					# Start Hold Timer
-					is_right_mouse_down = true
-					right_mouse_down_time = Time.get_ticks_msec()
-					
-			elif event.button_index == MOUSE_BUTTON_LEFT:
-				if event.double_click:
-					# Double Click on "Nothing" -> Create New Node
-					# Check distance to existing nodes to ensure we are in "empty space"
-					var mouse_pos = get_viewport().get_mouse_position()
-					var plane = Plane(Vector3.BACK, 0)
-					var from = camera.project_ray_origin(mouse_pos)
-					var dir = camera.project_ray_normal(mouse_pos)
-					
-					var world_pos = plane.intersects_ray(from, dir)
-					
-					if world_pos:
-						var is_safe_space = true
-						# Node Width is 2.0. Threshold = Width * 1.5 = 3.0
-						var safe_distance = 3.0 
-						
-						for child in node_root.get_children():
-							# Check against visible nodes (exclude fading ones if any?)
-							# Just check all direct children which are nodes
-							if child.position.distance_to(world_pos) < safe_distance:
-								is_safe_space = false
-								break
-						
-						if is_safe_space:
-							add_new_node()
-							
-				else:
-					# Single Click on "Nothing" -> Start Box Selection
-					# If we are here, it means we clicked on empty space (Nodes handle their own input)
-					
-					# Guard: Don't start box if we are dragging a node
-					if current_dragging_node:
-						return
-						
-					# Guard: Double check if we actually hit a node (Physics Raycast)
-					# Sometimes _unhandled_input fires even if we clicked a node (input propagation quirks)
-					var mouse_pos = get_viewport().get_mouse_position()
-					var from = camera.project_ray_origin(mouse_pos)
-					var to = from + camera.project_ray_normal(mouse_pos) * 1000.0
-					var space = get_world_3d().direct_space_state
-					var query = PhysicsRayQueryParameters3D.create(from, to)
-					query.collide_with_areas = true # MoodNodes are Areas
-					query.collide_with_bodies = true
-					
-					var result = space.intersect_ray(query)
-					if result:
-						# If we hit something that is a MoodNode, ABORT background logic
-						var collider = result.collider
-						if collider is Area3D and collider.has_method("set_selected"): # Duck typing MoodNode
-							return
-
-					# Start Box Selection
-					is_box_selecting = true
-					box_selection_start = get_viewport().get_mouse_position()
-					
-					var is_additive = Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_SHIFT)
-					
-					if not is_additive:
-						clear_selection()
-						if ui_layer: ui_layer.close_sidebar()
+	if event is InputEventKey and event.pressed:
+		if event.keycode == KEY_N:
+			add_new_node()
 
 func _handle_copy_command():
 	if selected_nodes.is_empty(): return
@@ -542,16 +366,8 @@ func _handle_paste():
 			
 			var err = img.save_png(file_path)
 			if err == OK:
-				# Calculate paste position (at mouse cursor or screen center)
-				# Preferred: Mouse Cursor
-				var mouse_pos = get_viewport().get_mouse_position()
-				var plane = Plane(Vector3.BACK, 0)
-				var from = camera.project_ray_origin(mouse_pos)
-				var dir = camera.project_ray_normal(mouse_pos)
-				var world_pos = plane.intersects_ray(from, dir)
-				
-				if not world_pos: 
-					world_pos = Vector3(0, 0, 0) # Fallback
+				var forward = -camera.global_transform.basis.z.normalized()
+				var world_pos = camera.global_position + forward * 4.0
 				
 				add_new_node_from_file(file_path, world_pos)
 			else:
@@ -565,6 +381,14 @@ func _go_up_layer():
 	# QoL: Close Sidebar on Transition
 	if ui_layer:
 		ui_layer.close_sidebar()
+		
+	# Save current positions before leaving layer
+	if current_layout_mode == LayoutMode.FREE:
+		for child in node_root.get_children():
+			if is_instance_valid(child) and child.has_method("set_selected") and not child.is_in_group("header_node"):
+				child.node_data["pos_x"] = child.position.x
+				child.node_data["pos_y"] = child.position.y
+				child.node_data["pos_z"] = child.position.z
 		
 	var parent_data = current_path_stack.pop_back()
 	
@@ -587,34 +411,12 @@ func add_new_node():
 		
 		# Prevent Overlap in Free Mode
 		if current_layout_mode == LayoutMode.FREE:
-			var safe_pos = Vector2.ZERO
-			var offset = 0
-			var found_safe = false
-			
-			# Check against existing nodes
-			# Simple spiral or linear offset search
-			while not found_safe:
-				found_safe = true
-				for child_data in current_view_data["children"]:
-					var cx = child_data.get("pos_x", 0.0)
-					var cy = child_data.get("pos_y", 0.0)
-					
-					# Distance Threshold (Node width approx 2.5)
-					if Vector2(cx, cy).distance_to(safe_pos) < 2.5:
-						found_safe = false
-						break
-				
-				if not found_safe:
-					offset += 1
-					# Spiraling out: Right, Down, Left, Up... simplified to just random or linear spread for now
-					# Or just stacking right
-					safe_pos.x += 2.6 
-					if safe_pos.x > 10.0: # Wrap line
-						safe_pos.x = 0
-						safe_pos.y -= 2.6
+			var forward = -camera.global_transform.basis.z.normalized()
+			var safe_pos = camera.global_position + forward * 4.0
 			
 			new_node_data["pos_x"] = safe_pos.x
 			new_node_data["pos_y"] = safe_pos.y
+			new_node_data["pos_z"] = safe_pos.z
 		
 		# If in Free Mode, try to place it near center or intelligently?
 		# Grid mode will auto-arrange.
@@ -628,10 +430,6 @@ enum AnimType { DEFAULT, TUNNEL_IN, TUNNEL_OUT }
 var current_view_data: Dictionary = {}
 
 func _process(_delta):
-	# QoL: Disable Zoom if Sidebar is Open
-	if ui_layer and camera:
-		camera.can_zoom = not ui_layer.is_sidebar_open()
-
 	# Continuous Drag Check
 	if current_dragging_node and is_instance_valid(current_dragging_node):
 		_update_drag_hover()
@@ -786,26 +584,28 @@ func _spawn_layer(parent_data: Dictionary, center_pos: Vector3, anim_type: AnimT
 
 		var s_val = float(data.get("scale", 1.0))
 		var target_scale = Vector3(s_val, s_val, s_val)
+		var saved_z = float(data.get("pos_z", 0.0))
 		
 		if anim_type == AnimType.TUNNEL_IN:
 			n.scale = Vector3.ZERO
-			n.position.z = -50.0
+			n.position.z = saved_z - 50.0
 			var tween = create_tween()
 			tween.set_parallel(true)
 			tween.tween_property(n, "scale", target_scale, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			tween.tween_property(n, "position:z", 0.0, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			tween.tween_property(n, "position:z", saved_z, 0.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		elif anim_type == AnimType.TUNNEL_OUT:
 			n.scale = target_scale * 3.0
-			n.position.z = 20.0 
+			n.position.z = saved_z + 20.0 
 			if n.has_method("set_label_opacity"):
 				n.set_label_opacity(0.0)
 				n.fade_label(1.0, 0.5)
 			var tween = create_tween()
 			tween.set_parallel(true)
 			tween.tween_property(n, "scale", target_scale, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-			tween.tween_property(n, "position:z", 0.0, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			tween.tween_property(n, "position:z", saved_z, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		else:
 			n.scale = Vector3.ZERO
+			n.position.z = saved_z # Ensure Z is set even without tunnel animation
 			var tween = create_tween()
 			tween.tween_property(n, "scale", target_scale, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(randf() * 0.2)
 
@@ -944,11 +744,9 @@ func _on_node_selected(node, is_multi):
 		# No modifier.
 		# If node ALREADY selected, DON'T clear yet. Wait for drag.
 		if node in selected_nodes:
-			print("Node IS in selection. Delaying clear. Setting potential: ", node.name)
 			potential_single_selection_node = node
 		else:
 			# Valid new single selection
-			print("Node NOT in selection. Clearing immediately.")
 			clear_selection()
 			node.set_selected(true)
 			selected_nodes.append(node)
@@ -1091,7 +889,6 @@ func _on_node_drag_ended(node):
 func _on_node_right_clicked(node):
 	if node and is_instance_valid(node):
 		clipboard_node_data = node.node_data.duplicate(true) # Deep Copy
-		print("Node Copied: ", clipboard_node_data.get("name"))
 		
 		# Show Toast
 		if ui_layer and ui_layer.has_method("show_toast"):
@@ -1099,8 +896,6 @@ func _on_node_right_clicked(node):
 
 func _handle_paste_from_clipboard():
 	if clipboard_node_data.is_empty(): return
-	
-	print("Pasting Node...")
 	
 	# Determine Position (Mouse)
 	var mouse_pos = get_viewport().get_mouse_position()
@@ -1153,8 +948,6 @@ func _check_reparent_drop(dropped_node) -> bool:
 	return false
 
 func _execute_reparent_to_sibling(node, target_node):
-	print("Reparenting ", node.name, " into ", target_node.name)
-	
 	# 1. Remove from Current Data
 	current_view_data["children"].erase(node.node_data)
 	
@@ -1196,8 +989,6 @@ func _execute_reparent_to_ancestor(node, target_header):
 	if target_data == current_view_data:
 		return
 		
-	print("Moving ", node.name, " up to ", target_data.get("name", "Ancestor"))
-	
 	# 1. Remove from Current
 	current_view_data["children"].erase(node.node_data)
 	
@@ -1240,6 +1031,14 @@ func _enter_node(node):
 	# QoL: Close Sidebar on Transition
 	if ui_layer:
 		ui_layer.close_sidebar()
+
+	# Save current positions before leaving layer
+	if current_layout_mode == LayoutMode.FREE:
+		for child in node_root.get_children():
+			if is_instance_valid(child) and child.has_method("set_selected") and not child.is_in_group("header_node"):
+				child.node_data["pos_x"] = child.position.x
+				child.node_data["pos_y"] = child.position.y
+				child.node_data["pos_z"] = child.position.z
 
 	current_path_stack.append(current_view_data) 
 	
@@ -1526,17 +1325,21 @@ func _calculate_free_layout(nodes_data: Array) -> Array:
 	for data in nodes_data:
 		var x = data.get("pos_x", null)
 		var y = data.get("pos_y", null)
+		var z = data.get("pos_z", null)
 		
 		if x == null or y == null:
 			positions.append(Vector3.ZERO) 
 		else:
-			positions.append(Vector3(x, y, 0))
+			if z == null: z = 0.0
+			positions.append(Vector3(x, y, z))
 			
 	# Fix placeholders
 	var fallback_grid = _calculate_grid_layout(nodes_data)
 	for i in range(positions.size()):
 		if positions[i] == Vector3.ZERO and (nodes_data[i].get("pos_x") == null):
+			var z_val = nodes_data[i].get("pos_z", 0.0)
 			positions[i] = fallback_grid[i]
+			positions[i].z = z_val
 			
 	return positions
 
@@ -1580,6 +1383,7 @@ func _on_align_grid_requested():
 	for i in range(children.size()):
 		children[i]["pos_x"] = grid_pos[i].x
 		children[i]["pos_y"] = grid_pos[i].y
+		children[i]["pos_z"] = grid_pos[i].z
 	
 	current_layout_mode = LayoutMode.FREE # Switch to Free so they stay there
 	if ui_layer:
@@ -1601,11 +1405,11 @@ func _on_node_position_changed(node, delta):
 				if other.node_data:
 					other.node_data["pos_x"] = other.position.x
 					other.node_data["pos_y"] = other.position.y
+					other.node_data["pos_z"] = other.position.z
 
 
 
 func _select_single_node(node):
-	print("_select_single_node EXECUTION for: ", node.name)
 	clear_selection()
 	node.set_selected(true)
 	selected_nodes.append(node)

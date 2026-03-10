@@ -3,14 +3,19 @@
 ## How to Use
 
 ### Controls
--   **Mouse Left Click**: Select / Drag Nodes.
--   **Right Click (Hold)**: Rotate Camera.
--   **Mouse Wheel**: Zoom In/Out.
--   **WASD / Arrow Keys**: Move Camera.
--   **F / Timeline / Grid Buttons**: Switch View Modes.
+-   **Mouse**: Look Around (First Person View).
+-   **WASD / Arrow Keys**: Move Camera Forward/Back/Left/Right.
+-   **Space / Left-Ctrl**: Move Camera Up / Down.
+-   **E**: Grab / Drop a Node.
+-   **Mouse Wheel (While Grabbing)**: Move the held node closer/further.
+-   **Mouse Wheel (While Selected)**: Push/pull all selected nodes along the camera view direction.
+-   **Left Click**: Select Nodes (Hold Ctrl to Multi-Select).
+-   **Left Double-Click**: Enter a selected folder/node layer.
+-   **Right Click (Hold) / Middle Mouse**: Navigate Back / Up a layer.
 -   **Right Click (Double Click)**: Paste Node (if copied).
 -   **Ctrl+C**: Copy Selected Node.
 -   **Ctrl+V**: Paste (Image or Node).
+-   **Esc**: Save and Return to Main Menu.
 
 ### Board Management
 -   **Create New**: Enter a name in the main menu to create a new `.moo` board file.
