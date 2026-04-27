@@ -98,6 +98,10 @@ func _ready():
 	# Pool initialization removed
 		
 	_spawn_layer(mood_data, Vector3.ZERO)
+	
+	# Show Creation Hint
+	if ui_layer and ui_layer.has_method("show_creation_hint"):
+		ui_layer.show_creation_hint()
 
 func _setup_environment():
 	# 3D "SCREEN SPACE" BACKGROUND IMPLEMENTATION
@@ -162,6 +166,7 @@ func _setup_environment():
 		
 	sky_mat.panorama = tex
 	env.background_mode = Environment.BG_SKY
+	env.sky_rotation = Vector3(0, PI, 0) # Rotate 180° so seam is behind camera
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.glow_enabled = true
 	env.glow_intensity = 1.5
@@ -338,7 +343,7 @@ func _unhandled_input(event):
 				get_viewport().set_input_as_handled()
 				
 	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_N:
+		if event.keycode == KEY_N or event.keycode == KEY_C:
 			add_new_node()
 
 func _handle_copy_command():
@@ -482,6 +487,62 @@ func _update_drag_hover():
 				hovered_reparent_node.show_reparent_feedback()
 	
 	# If nothing found, hovered_reparent_node becomes null (after hiding old)
+
+# --- 3D GRAB REPARENT SYSTEM ---
+# Called by CameraController._process() while a node is grabbed
+func update_grab_reparent_hover(grabbed: Node3D):
+	var found_node = null
+	var threshold = 1.5
+	
+	# Check all nodes (siblings + headers)
+	for other in node_root.get_children():
+		if other == grabbed: continue
+		if not is_instance_valid(other): continue
+		if other.is_queued_for_deletion(): continue
+		if not other.has_method("set_selected"): continue
+		
+		var dist = grabbed.global_position.distance_to(other.global_position)
+		if dist < threshold:
+			found_node = other
+			break
+	
+	# Update state
+	if found_node != hovered_reparent_node:
+		# Exit old
+		if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+			if hovered_reparent_node.has_method("hide_reparent_feedback"):
+				hovered_reparent_node.hide_reparent_feedback()
+		
+		# Enter new
+		hovered_reparent_node = found_node
+		if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+			if hovered_reparent_node.has_method("show_reparent_feedback"):
+				hovered_reparent_node.show_reparent_feedback()
+
+# Called by CameraController when dropping a grabbed node
+func execute_grab_reparent_drop(grabbed: Node3D) -> bool:
+	if not hovered_reparent_node or not is_instance_valid(hovered_reparent_node):
+		hovered_reparent_node = null
+		return false
+	
+	var target = hovered_reparent_node
+	
+	# Determine if target is header (ancestor) or sibling
+	if target.is_in_group("header_node"):
+		_execute_reparent_to_ancestor(grabbed, target)
+	else:
+		_execute_reparent_to_sibling(grabbed, target)
+	
+	# Cleanup visuals
+	target.hide_reparent_feedback()
+	hovered_reparent_node = null
+	return true
+
+func clear_grab_reparent_hover():
+	if hovered_reparent_node and is_instance_valid(hovered_reparent_node):
+		if hovered_reparent_node.has_method("hide_reparent_feedback"):
+			hovered_reparent_node.hide_reparent_feedback()
+	hovered_reparent_node = null
 
 
 func clear_selection():

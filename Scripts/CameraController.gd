@@ -12,6 +12,11 @@ var yaw: float = 0.0
 var grabbed_node: Node3D = null
 var grab_distance: float = 4.0
 
+# Hold-Click to Enter
+var _left_click_target: Node3D = null
+var _left_click_time: int = 0
+var _is_left_holding: bool = false
+
 func _ready():
 	position = Vector3(0, 0, default_distance)
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
@@ -29,14 +34,40 @@ func _unhandled_input(event):
 			main_script.return_to_menu()
 			return
 	
-	# Recapture mouse on click or handle double click
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	# Left Click: Select (short) or Enter (hold)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
-			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+			if event.pressed:
+				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+				# Close sidebar when recapturing mouse
+				var main_script = get_node("/root/Main")
+				if main_script == null: main_script = get_parent()
+				if main_script and main_script.ui_layer and main_script.ui_layer.has_method("close_sidebar"):
+					main_script.ui_layer.close_sidebar()
+					main_script.clear_selection()
+				get_viewport().set_input_as_handled()
+			return
+		
+		if event.pressed and grabbed_node != null:
+			# Left click while holding a node: try reparent first, then drop
+			var main_script = get_node("/root/Main")
+			if main_script == null: main_script = get_parent()
+			
+			if main_script and main_script.has_method("execute_grab_reparent_drop"):
+				if main_script.execute_grab_reparent_drop(grabbed_node):
+					grabbed_node = null
+					get_viewport().set_input_as_handled()
+					return
+			
+			# No reparent target: just drop in place
+			if main_script and main_script.has_method("clear_grab_reparent_hover"):
+				main_script.clear_grab_reparent_hover()
+			grabbed_node = null
 			get_viewport().set_input_as_handled()
 			return
-		elif event.double_click and grabbed_node == null:
-			# Double click while captured: try to enter node
+		
+		if event.pressed and grabbed_node == null:
+			# Raycast from center of screen to find a node
 			var space_state = get_world_3d().direct_space_state
 			var query = PhysicsRayQueryParameters3D.create(global_position, global_position - global_transform.basis.z * 100.0)
 			query.collide_with_areas = true
@@ -46,10 +77,39 @@ func _unhandled_input(event):
 			if result:
 				var collider = result.collider
 				if collider.has_method("set_selected"):
-					collider.emit_signal("node_entered", collider)
+					# Start hold timer
+					_left_click_target = collider
+					_left_click_time = Time.get_ticks_msec()
+					_is_left_holding = true
 					get_viewport().set_input_as_handled()
 					return
-					
+		
+		if not event.pressed and _is_left_holding:
+			# Released - check hold duration
+			var elapsed = Time.get_ticks_msec() - _left_click_time
+			_is_left_holding = false
+			
+			var main_script = get_node("/root/Main")
+			if main_script == null: main_script = get_parent()
+			
+			if elapsed >= 600:
+				# Hold click: enter node
+				if _left_click_target and is_instance_valid(_left_click_target):
+					_left_click_target.emit_signal("node_entered", _left_click_target)
+			else:
+				# Short click: select node + open sidebar
+				if _left_click_target and is_instance_valid(_left_click_target):
+					if main_script and main_script.has_method("_on_node_selected"):
+						main_script._on_node_selected(_left_click_target, false)
+			
+			# Hide hold indicator
+			if main_script and main_script.ui_layer:
+				main_script.ui_layer.hide_hold_indicator()
+			
+			_left_click_target = null
+			get_viewport().set_input_as_handled()
+			return
+
 	# Right Click to Go Back
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
 		var main_script = get_node("/root/Main") # or get_parent() depending on scene tree
@@ -112,6 +172,28 @@ func _unhandled_input(event):
 		rotation.x = pitch
 
 func _process(delta):
+	# Hold-Click Indicator (mirrors right-click hold)
+	if _is_left_holding:
+		var elapsed = Time.get_ticks_msec() - _left_click_time
+		var progress = float(elapsed) / 600.0
+		
+		var main_script = get_node("/root/Main")
+		if main_script == null: main_script = get_parent()
+		
+		# Show hold indicator at center of screen
+		if main_script and main_script.ui_layer:
+			var center = get_viewport().get_visible_rect().size / 2.0
+			main_script.ui_layer.update_hold_indicator(center, progress)
+		
+		if elapsed >= 600:
+			# Auto-enter on hold completion
+			_is_left_holding = false
+			if _left_click_target and is_instance_valid(_left_click_target):
+				_left_click_target.emit_signal("node_entered", _left_click_target)
+			_left_click_target = null
+			if main_script and main_script.ui_layer:
+				main_script.ui_layer.hide_hold_indicator()
+	
 	# Movement
 	if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 		var input_dir = Vector3.ZERO
@@ -135,7 +217,8 @@ func _process(delta):
 		# Keep forward and right flat on XZ plane if you want standard FPS movement,
 		# or allow flying if you want 6DOF. Let's do 6DOF (flying) since it's a moodboard.
 		var move_dir = (right * input_dir.x) + (global_transform.basis.y.normalized() * input_dir.y) + (forward * -input_dir.z)
-		position += move_dir * move_speed * delta
+		var speed = move_speed * (1.8 if Input.is_physical_key_pressed(KEY_SHIFT) else 1.0)
+		position += move_dir * speed * delta
 
 	# Update grabbed node position
 	if grabbed_node and is_instance_valid(grabbed_node):
@@ -146,15 +229,30 @@ func _process(delta):
 		# Update node's internal position data so it saves correctly
 		grabbed_node.node_data["pos_x"] = grabbed_node.global_position.x
 		grabbed_node.node_data["pos_y"] = grabbed_node.global_position.y
-		# Wait, 3D nodes should save Z as well? MoodBoard was 2D. 
-		# If we save Z, we need to ensure nodes have a pos_z.
 		if not grabbed_node.node_data.has("pos_z"):
 			grabbed_node.node_data["pos_z"] = 0.0
 		grabbed_node.node_data["pos_z"] = grabbed_node.global_position.z
+		
+		# Check reparent proximity
+		var main_script = get_node("/root/Main")
+		if main_script == null: main_script = get_parent()
+		if main_script and main_script.has_method("update_grab_reparent_hover"):
+			main_script.update_grab_reparent_hover(grabbed_node)
 
 func _toggle_grab():
 	if grabbed_node:
-		# Drop it
+		# Drop it: try reparent first
+		var main_script = get_node("/root/Main")
+		if main_script == null: main_script = get_parent()
+		
+		if main_script and main_script.has_method("execute_grab_reparent_drop"):
+			if main_script.execute_grab_reparent_drop(grabbed_node):
+				grabbed_node = null
+				return
+		
+		# No reparent: just drop
+		if main_script and main_script.has_method("clear_grab_reparent_hover"):
+			main_script.clear_grab_reparent_hover()
 		grabbed_node = null
 	else:
 		# Attempt to grab

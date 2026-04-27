@@ -188,6 +188,9 @@ func show_sidebar(node_data: Dictionary, node_ref):
 	
 	sidebar.visible = true
 	
+	# Free mouse so user can click sidebar controls
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	
 	if not was_visible:
 		# Initial Open Animation (Slide In)
 		# Start Off-Screen (Collapsed Position)
@@ -387,6 +390,8 @@ func close_sidebar():
 	# After animation, hide everything
 	tween.chain().tween_callback(func():
 		sidebar.visible = false
+		# Re-capture mouse for camera movement
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	)
 
 	current_node_ref = null
@@ -749,3 +754,62 @@ func update_selection_box(rect: Rect2):
 func hide_selection_box():
 	if selection_box:
 		selection_box.visible = false
+
+func show_creation_hint():
+	var hint_label = Label.new()
+	hint_label.text = "Press C to create node"
+	hint_label.name = "CreationHint"
+	
+	# Premium Style
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0.4)
+	style.corner_radius_top_left = 12
+	style.corner_radius_top_right = 12
+	style.corner_radius_bottom_left = 12
+	style.corner_radius_bottom_right = 12
+	style.content_margin_left = 30
+	style.content_margin_right = 30
+	style.content_margin_top = 15
+	style.content_margin_bottom = 15
+	style.shadow_color = Color(0, 0, 0, 0.2)
+	style.shadow_size = 10
+	style.shadow_offset = Vector2(0, 5)
+	
+	hint_label.add_theme_stylebox_override("normal", style)
+	hint_label.add_theme_font_size_override("font_size", 28)
+	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	
+	hint_label.modulate.a = 0.0 # Start hidden
+	
+	$ForegroundLayer.add_child(hint_label)
+	
+	# Position at bottom center after the label knows its size
+	await get_tree().process_frame
+	var screen_size = get_viewport_rect().size
+	var label_size = hint_label.get_minimum_size()
+	hint_label.position = Vector2(
+		(screen_size.x - label_size.x) / 2.0,
+		screen_size.y - label_size.y - 80.0
+	)
+	hint_label.pivot_offset = label_size / 2.0
+	
+	# Animation (3 seconds total)
+	var tween = create_tween()
+	
+	# Fade In + Slight Scale Up
+	hint_label.scale = Vector2(0.9, 0.9)
+	
+	tween.set_parallel(true)
+	tween.tween_property(hint_label, "modulate:a", 1.0, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(hint_label, "scale", Vector2.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	
+	# Wait
+	tween.set_parallel(false)
+	tween.tween_interval(2.0)
+	
+	# Fade Out
+	tween.tween_property(hint_label, "modulate:a", 0.0, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	
+	# Cleanup
+	tween.tween_callback(hint_label.queue_free)
